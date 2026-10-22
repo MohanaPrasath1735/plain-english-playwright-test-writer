@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "codespace:start": "node scripts/start_codespace.mjs",
     "dashboard": "tsx src/pipeline/10_webui.ts",

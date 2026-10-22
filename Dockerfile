@@ -1,6 +1,6 @@
 # ==============================================================================
 # Agentic Playwright Test Writer - Unified Container
-# Base: Official Microsoft Playwright image (includes Node, Chromium, Firefox, WebKit, and system dependencies)
+# Base: Official Microsoft Playwright image (includes Node 22 LTS, Chromium, Firefox, WebKit, and system dependencies)
 # ==============================================================================
 FROM mcr.microsoft.com/playwright:v1.50.0-noble
 

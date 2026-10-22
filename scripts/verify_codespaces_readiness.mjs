@@ -32,7 +32,7 @@ async function verifyCodespaces() {
     throw new Error(`devcontainer.json is not valid JSON: ${err.message}`);
   }
 
-  check(devcontainer.image.includes('javascript-node:1-20') || devcontainer.image.includes('node:20') || devcontainer.image.includes('javascript-node:20'), 'Base image uses Node 20 devcontainer');
+  check(devcontainer.image.includes('javascript-node:1-22') || devcontainer.image.includes('node:22') || devcontainer.image.includes('javascript-node:22'), 'Base image uses Node 22 devcontainer');
   check(Array.isArray(devcontainer.forwardPorts) && devcontainer.forwardPorts.includes(3050) && !devcontainer.forwardPorts.includes(3000), 'forwardPorts contains [3050] and DOES NOT publicly forward 3000');
   check(devcontainer.portsAttributes && devcontainer.portsAttributes['3050'], 'portsAttributes defined for 3050');
   check(devcontainer.portsAttributes['3050'].label === 'Agent Dashboard', 'Port 3050 has descriptive label');

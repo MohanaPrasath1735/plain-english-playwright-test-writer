@@ -67,7 +67,7 @@ The platform operates on a deterministic 8-station pipeline architecture:
 ## Setup & Installation from a Fresh Clone
 
 ### 1. Prerequisites
-- **Node.js**: v22.0.0 or higher
+- **Node.js**: v22.0.0 or higher (required for built-in `node:sqlite` module support; specified in `package.json` engines)
 - **npm**: v10.0.0 or higher
 - **Google Gemini API Key**: Obtainable from [Google AI Studio](https://aistudio.google.com/)
 
@@ -196,7 +196,7 @@ Before creating your Codespace, configure your API key as a secret:
 3. Click **Create codespace on main**.
 
 The automated `.devcontainer/devcontainer.json` environment will build automatically:
-- Provisions the official Node 20 Devcontainer (`mcr.microsoft.com/devcontainers/javascript-node:1-20`).
+- Provisions the official Node 22 Devcontainer (`mcr.microsoft.com/devcontainers/javascript-node:1-22`).
 - Runs `npm install` for the agent platform.
 - Installs Playwright Chromium with all required Linux OS libraries (`npx playwright install --with-deps chromium`).
 - Clones the pinned open-source Conduit demo app (`https://github.com/gutentag2012/realworld-nextjs-trpc-prisma.git` at commit `1413fb9cc94409bdb47d904f9895084b050e900c`), pushes SQLite Prisma migrations, and generates the database client.

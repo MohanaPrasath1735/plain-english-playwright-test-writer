@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "codespace:start": "node scripts/start_codespace.mjs",
     "dashboard": "tsx src/pipeline/10_webui.ts",
     "test": "tsx src/index.ts ALL",
     "test:all": "tsx src/index.ts ALL",

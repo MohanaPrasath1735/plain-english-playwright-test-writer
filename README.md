@@ -177,6 +177,54 @@ docker inspect --format='{{json .State.Health}}' agentic-dashboard
 
 ---
 
+## Run in GitHub Codespaces
+
+You can run and evaluate this entire agent platform in a browser using GitHub Codespaces with zero local setup:
+
+### 1. Configure the Gemini API Secret in GitHub
+Before creating your Codespace, configure your API key as a secret:
+1. Navigate to **GitHub Settings** ➔ **Codespaces** ➔ **Codespaces secrets** (or repository **Settings** ➔ **Secrets and variables** ➔ **Codespaces**).
+2. Click **New secret**.
+3. Name: `GEMINI_API_KEY`
+4. Value: `your_actual_gemini_api_key_here`
+5. Select this repository under repository access and save.
+> **Security Guarantee**: `GEMINI_API_KEY` is injected strictly via environment variables. It is never committed, baked into images, or logged.
+
+### 2. Launch the Codespace
+1. Click the green **Code** button at the top of this repository.
+2. Select the **Codespaces** tab.
+3. Click **Create codespace on main**.
+
+The automated `.devcontainer/devcontainer.json` environment will build automatically:
+- Provisions the official Node 20 Devcontainer (`mcr.microsoft.com/devcontainers/javascript-node:1-20`).
+- Runs `npm install` for the agent platform.
+- Installs Playwright Chromium with all required Linux OS libraries (`npx playwright install --with-deps chromium`).
+- Clones the pinned open-source Conduit demo app (`https://github.com/gutentag2012/realworld-nextjs-trpc-prisma.git` at commit `1413fb9cc94409bdb47d904f9895084b050e900c`), pushes SQLite Prisma migrations, and generates the database client.
+
+### 3. Start Conduit and Dashboard with One Command
+In the Codespace terminal:
+```bash
+npm run codespace:start
+```
+This orchestrates:
+- **Internal Demo App**: Launches Conduit in the background on `localhost:3000` (kept internal, not exposed publicly).
+- **Public Dashboard**: Launches the Agent Dashboard on port `3050` once Conduit is ready.
+
+### 4. Access the Dashboard
+GitHub Codespaces will display a notification: *"Your application running on port 3050 is available."*
+Click **Open in Browser** (or navigate to the **Ports** tab and open port `3050`).
+- The health probe is available at `/health`.
+- Public security: all endpoints initiating test execution or LLM prompts are guarded by a 15 req/min rate limiter (HTTP 429), and external crawl requests are strictly guarded against SSRF.
+
+### 5. Run Benchmark Tests from Codespace Terminal
+You can also run tests or bonus features at any time:
+```bash
+npm run test:all
+npm run bonus
+```
+
+---
+
 ## Running the 4 Test Cases
 
 You can run the full suite or individual test cases directly from the CLI:

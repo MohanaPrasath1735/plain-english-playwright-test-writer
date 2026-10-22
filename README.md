@@ -201,18 +201,24 @@ The automated `.devcontainer/devcontainer.json` environment will build automatic
 - Installs Playwright Chromium with all required Linux OS libraries (`npx playwright install --with-deps chromium`).
 - Clones the pinned open-source Conduit demo app (`https://github.com/gutentag2012/realworld-nextjs-trpc-prisma.git` at commit `1413fb9cc94409bdb47d904f9895084b050e900c`), pushes SQLite Prisma migrations, and generates the database client.
 
-### 3. Start Conduit and Dashboard with One Command
-In the Codespace terminal:
+### 3. Automatic Startup on Launch and Restart
+The Codespace automatically starts both services in the background whenever it is created, started, or restarted via the `postStartCommand` in `.devcontainer/devcontainer.json` (invoking `.devcontainer/post-start.sh`):
+- **Internal Demo App**: Launches Conduit in the background on `localhost:3000` (kept internal, not exposed publicly).
+- **Public Dashboard**: Launches the Agent Dashboard on port `3050`.
+- **Logs**: Both services write stdout and stderr to `codespace-services.log` in the project root.
+- **Readiness Probes**: Automatically waits until `http://localhost:3000` and `http://localhost:3050/health` respond before completing startup.
+
+If you ever need to manually restart or run the services from the terminal, you can run:
 ```bash
 npm run codespace:start
+# or
+bash .devcontainer/post-start.sh
 ```
-This orchestrates:
-- **Internal Demo App**: Launches Conduit in the background on `localhost:3000` (kept internal, not exposed publicly).
-- **Public Dashboard**: Launches the Agent Dashboard on port `3050` once Conduit is ready.
 
 ### 4. Access the Dashboard
 GitHub Codespaces will display a notification: *"Your application running on port 3050 is available."*
 Click **Open in Browser** (or navigate to the **Ports** tab and open port `3050`).
+- **Port Visibility Note**: If the forwarded port returns a 403 or auth prompt when opened in an external browser, right-click port **3050** in the **Ports** tab and select **Port Visibility** ➔ **Public** (see [Troubleshooting](#3-port-private-in-codespaces-port-3050)).
 - The health probe is available at `/health`.
 - Public security: all endpoints initiating test execution or LLM prompts are guarded by a 15 req/min rate limiter (HTTP 429), and external crawl requests are strictly guarded against SSRF.
 
@@ -269,6 +275,70 @@ npm run bonus
 # Approve and execute the TC2 self-healing fix on a separate copy
 npm run bonus:heal
 ```
+
+---
+
+## Troubleshooting
+
+### 1. Node Version (`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`)
+- **Problem**: When starting the dashboard or running tests, Node fails with:
+  ```
+  ERR_UNKNOWN_BUILTIN_MODULE: No such built-in module: node:sqlite
+  ```
+- **Cause**: Built-in `node:sqlite` was introduced in Node.js v22.5.0 and does not exist in Node.js 20 or earlier.
+- **Fix**:
+  - **Locally**: Ensure you have Node.js v22.0.0 or higher installed (`node -v`).
+  - **In Codespaces**: Ensure `.devcontainer/devcontainer.json` specifies `"image": "mcr.microsoft.com/devcontainers/javascript-node:1-22"`. If you created your Codespace before this update, press `Ctrl+Shift+P` (or `Cmd+Shift+P`), select **Codespaces: Rebuild Container**, and wait for the updated container to build.
+  - **In Docker**: The base image `mcr.microsoft.com/playwright:v1.50.0-noble` includes Node 22 LTS by default.
+
+### 2. Missing Secret (`GEMINI_API_KEY`)
+- **Problem**: Test drafting (`4_draft.ts`), critic upgrade (`5_critic.ts`), or dashboard runs fail with missing API key or authorization errors.
+- **Cause**: The Google Gemini API key is missing from your runtime environment.
+- **Fix**:
+  - **In Codespaces**: Add your key to GitHub Codespaces secrets:
+    1. Go to repository **Settings** (or GitHub profile **Settings**) ➔ **Secrets and variables** ➔ **Codespaces**.
+    2. Click **New repository secret**, name it `GEMINI_API_KEY`, and paste your key.
+    3. Restart or rebuild the Codespace so the secret is injected.
+  - **Locally**: Create a `.env` file in the root directory:
+    ```env
+    GEMINI_API_KEY=your_actual_key_here
+    APP_BASE_URL=http://localhost:3000
+    ```
+  - **In Docker**: Pass `-e GEMINI_API_KEY="your_actual_key_here"` in the `docker run` command.
+
+### 3. Port Private in Codespaces (Port 3050)
+- **Problem**: Accessing port 3050 in an external browser returns an HTTP 403 Forbidden error, GitHub authentication redirection, or a blank loading screen.
+- **Cause**: Forwarded ports in Codespaces default to `private` visibility for security. While `.devcontainer/post-start.sh` automatically attempts `gh codespace ports visibility 3050:public -c "$CODESPACE_NAME"`, the default container `GITHUB_TOKEN` inside Codespaces typically has repository scope rather than user codespace management scope, preventing automated CLI visibility modification.
+- **Fix (Manual Step)**:
+  1. In VS Code / Web Codespace, open the **Ports** tab in the bottom panel.
+  2. Locate port **3050 (Agent Dashboard)**.
+  3. Right-click port **3050** and select **Port Visibility** ➔ **Public**.
+  4. Click the globe icon or browse to the forwarded public URL.
+
+### 4. Server Not Running / Unresponsive (Ports 3050 or 3000)
+- **Problem**: Visiting `http://localhost:3050` or `http://localhost:3000` returns `ECONNREFUSED` or "Unable to connect".
+- **Cause**: Background processes failed to start, crashed, or terminated.
+- **Fix**:
+  - Check if processes are active: `ps aux | grep node`.
+  - Check `codespace-services.log` for error traces: `tail -n 50 codespace-services.log`.
+  - Restart the services manually:
+    ```bash
+    npm run codespace:start
+    # or
+    bash .devcontainer/post-start.sh
+    ```
+
+### 5. Where the Log File Is Located
+- **Location**: `codespace-services.log` located at the root of the project workspace (`/workspaces/<repository-name>/codespace-services.log`).
+- **Viewing Logs**:
+  ```bash
+  # Follow live output
+  tail -f codespace-services.log
+
+  # View the last 100 lines
+  tail -n 100 codespace-services.log
+  ```
+- **Contents**: Contains timestamped stdout/stderr output from the internal Conduit demo app (port 3000), Agent Dashboard (port 3050), and readiness probes.
 
 ---
 

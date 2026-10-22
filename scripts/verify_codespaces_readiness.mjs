@@ -39,12 +39,17 @@ async function verifyCodespaces() {
   check(devcontainer.portsAttributes['3050'].onAutoForward === 'notify', 'Port 3050 onAutoForward is "notify"');
   check(devcontainer.portsAttributes['3000'] && devcontainer.portsAttributes['3000'].onAutoForward === 'ignore', 'Port 3000 onAutoForward is "ignore"');
   check(Boolean(devcontainer.postCreateCommand), 'postCreateCommand is defined');
+  check(Boolean(devcontainer.postStartCommand), 'postStartCommand is defined');
+  check(devcontainer.postStartCommand.includes('post-start.sh'), 'postStartCommand invokes post-start.sh');
 
   // 2. setup.sh validation
   console.log('\n[Check 2] Validating .devcontainer/setup.sh...');
   const setupShPath = path.resolve(rootDir, '.devcontainer', 'setup.sh');
+  const postStartShPath = path.resolve(rootDir, '.devcontainer', 'post-start.sh');
   check(fs.existsSync(setupShPath), '.devcontainer/setup.sh exists');
+  check(fs.existsSync(postStartShPath), '.devcontainer/post-start.sh exists');
   const setupShContent = fs.readFileSync(setupShPath, 'utf-8');
+  const postStartShContent = fs.readFileSync(postStartShPath, 'utf-8');
   check(setupShContent.includes('npm install'), 'setup.sh runs npm install');
   check(setupShContent.includes('npx playwright install --with-deps chromium'), 'setup.sh installs Playwright with deps');
   check(setupShContent.includes('https://github.com/gutentag2012/realworld-nextjs-trpc-prisma.git'), 'setup.sh clones Conduit repo');
@@ -72,6 +77,7 @@ async function verifyCodespaces() {
   console.log('\n[Check 5] Auditing for secret leaks...');
   check(!devcontainerRaw.includes('AIza') && !devcontainerRaw.includes('GEMINI_API_KEY='), 'devcontainer.json contains no hardcoded secrets');
   check(!setupShContent.includes('AIza') && !setupShContent.includes('GEMINI_API_KEY='), 'setup.sh contains no hardcoded secrets');
+  check(!postStartShContent.includes('AIza') && !postStartShContent.includes('GEMINI_API_KEY='), 'post-start.sh contains no hardcoded secrets');
   check(!startMjsContent.includes('AIza') && !startMjsContent.includes('AIzaSy'), 'start_codespace.mjs contains no hardcoded secrets');
 
   // 6. README section

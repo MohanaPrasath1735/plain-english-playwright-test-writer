@@ -21,8 +21,30 @@ import { getAllSiteCheckRecords, deleteSiteCheckRecord, clearAllSiteCheckRecords
 import { executeSiteCheckProposal } from '../site_checker/proposal_runner.js';
 import { renderSiteCheckCard } from '../site_checker/html_renderer.js';
 import { renderTopNavBar, renderSiteCheckPageHtml } from '../site_checker/page_renderer.js';
+import { RateLimiter } from '../site_checker/ssrf_guard.js';
 
-const PORT = 3050;
+const PORT = parseInt(process.env.PORT || '3050', 10);
+
+// Global execution & LLM rate limiter: 15 requests per minute per IP
+const executionRateLimiter = new RateLimiter(15, 60000);
+
+function checkExecutionRateLimit(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const forwarded = req.headers['x-forwarded-for'];
+  const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') || req.socket.remoteAddress || 'client';
+  const limit = executionRateLimiter.checkLimit(clientIp);
+  if (!limit.allowed) {
+    res.writeHead(429, {
+      'Content-Type': 'application/json',
+      'Retry-After': String(limit.retryAfterSec || 10),
+    });
+    res.end(JSON.stringify({
+      success: false,
+      error: `Rate limit exceeded. Please wait ${limit.retryAfterSec || 10} seconds before starting another execution or LLM request.`,
+    }));
+    return false;
+  }
+  return true;
+}
 
 function parseJsonBody(req: http.IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
@@ -83,6 +105,21 @@ export function startWebUI(port: number = PORT): http.Server {
         fs.createReadStream(scriptPath).pipe(res);
         return;
       }
+    }
+
+    // Health check endpoint (for container probes, monitoring, orchestrators)
+    if (url.pathname === '/health' || url.pathname === '/api/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok',
+        uptimeSeconds: Math.floor(process.uptime()),
+        timestamp: new Date().toISOString(),
+        service: 'agentic-playwright-dashboard',
+        port,
+        appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:3000',
+        database: 'connected',
+      }));
+      return;
     }
 
     // API endpoint for runs data
@@ -159,6 +196,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // API endpoint to execute site check
     if (url.pathname === '/api/site-check/run' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       try {
         const body = await parseJsonBody(req);
         const targetUrl = (body.url || '').trim();
@@ -184,6 +222,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // API endpoint to execute site check with streaming live progress updates (NDJSON)
     if (url.pathname === '/api/site-check/run-stream' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       res.writeHead(200, {
         'Content-Type': 'application/x-ndjson',
         'Cache-Control': 'no-cache, no-transform',
@@ -226,6 +265,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // API endpoint to approve and run site test proposal
     if (url.pathname === '/api/site-check/approve-proposal' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       try {
         const body = await parseJsonBody(req);
         const { checkId, proposalId, permissionChecked } = body;
@@ -246,6 +286,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // Streaming API: Draft new test scenario with live step-by-step progress
     if (url.pathname === '/api/pipeline/draft-stream' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       res.writeHead(200, {
         'Content-Type': 'application/x-ndjson',
         'Cache-Control': 'no-cache, no-transform',
@@ -298,6 +339,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // Pipeline API: Draft new test scenario (Steps 1-5, halts in PENDING_APPROVAL)
     if (url.pathname === '/api/pipeline/draft' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       try {
         const body = await parseJsonBody(req);
         const flow = body.flow_description;
@@ -332,6 +374,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // Pipeline API: Approve and execute test run (Steps 6-8, blocks duplicate retries)
     if (url.pathname === '/api/pipeline/approve' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       try {
         const body = await parseJsonBody(req);
         const runId = body.runId;
@@ -375,6 +418,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // Bonus API: Approve & execute TC2 self-healing
     if (url.pathname === '/api/bonus/heal-tc2' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       try {
         const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
         const reachability = await checkDemoAppReachable(baseUrl);
@@ -412,6 +456,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // Bonus API: Run TC1 3x stability score
     if (url.pathname === '/api/bonus/run-stability' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       try {
         const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
         const reachability = await checkDemoAppReachable(baseUrl);
@@ -438,6 +483,7 @@ export function startWebUI(port: number = PORT): http.Server {
 
     // Bonus API: Run accessibility check
     if (url.pathname === '/api/bonus/run-a11y' && req.method === 'POST') {
+      if (!checkExecutionRateLimit(req, res)) return;
       try {
         const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
         const reachability = await checkDemoAppReachable(baseUrl);
@@ -492,9 +538,10 @@ export function startWebUI(port: number = PORT): http.Server {
     }
   });
 
-  server.listen(port, () => {
+  server.listen(port, '0.0.0.0', () => {
     console.log(`\n======================================================`);
-    console.log(`Agent Dashboard Web UI is live at: http://localhost:${port}`);
+    console.log(`Agent Dashboard Web UI is live at: http://0.0.0.0:${port}`);
+    console.log(`Targeting Conduit at APP_BASE_URL: ${process.env.APP_BASE_URL || 'http://localhost:3000'}`);
     console.log(`======================================================\n`);
   });
 

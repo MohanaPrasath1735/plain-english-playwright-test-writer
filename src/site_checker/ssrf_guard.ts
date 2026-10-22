@@ -200,7 +200,7 @@ export async function validateUrlSafety(inputUrl: string): Promise<UrlSafetyChec
 /**
  * In-memory sliding window rate limiter
  */
-class RateLimiter {
+export class RateLimiter {
   private requests: Map<string, number[]> = new Map();
   private maxRequests: number;
   private windowMs: number;

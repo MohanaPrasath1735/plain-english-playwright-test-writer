@@ -94,10 +94,14 @@ APP_BASE_URL=http://localhost:3000
 ### 4. Clone and Start the Conduit Demo App
 In a separate terminal window, set up and launch the Conduit target application:
 ```bash
-# Clone the Next.js RealWorld Conduit demo app
-git clone https://github.com/mutoe/t3-realworld.git conduit-app
+# Clone the open-source Next.js RealWorld Conduit demo app
+git clone https://github.com/gutentag2012/realworld-nextjs-trpc-prisma.git conduit-app
 cd conduit-app
-npm install
+git checkout 1413fb9cc94409bdb47d904f9895084b050e900c
+cp .env.example .env
+npm install --legacy-peer-deps
+npx prisma generate
+npx prisma db push
 npm run dev
 ```
 Verify that the Conduit application is live at `http://localhost:3000` and the registration page is accessible at `http://localhost:3000/register`.
@@ -112,6 +116,64 @@ Open your browser to:
 http://localhost:3050
 ```
 *Note: If `agent_data.sqlite` is not present on initial launch, the system automatically initializes the live database from `data/seed.sqlite`.*
+
+---
+
+## Docker Container Deployment (Single Unified Container)
+
+The platform is fully packaged for deployment as a single self-contained Docker container:
+- **Base Image**: Official Microsoft Playwright image (`mcr.microsoft.com/playwright:v1.50.0-noble`) with Node.js and all browser automation dependencies pre-installed.
+- **Internal Demo App**: Clones and builds Conduit (`https://github.com/gutentag2012/realworld-nextjs-trpc-prisma.git` @ commit `1413fb9cc94409bdb47d904f9895084b050e900c`) at image build time, running strictly on internal `localhost:3000`.
+- **Public Dashboard**: Listens on the configured `PORT` environment variable (`0.0.0.0:$PORT`, default `3050`). `APP_BASE_URL` points internally to `http://localhost:3000`.
+- **Zero Hardcoded Secrets**: Secrets are NEVER baked into the image. `GEMINI_API_KEY` is read strictly from container environment variables at runtime.
+- **Health Check Probe**: Built-in `/health` (and `/api/health`) endpoint returning HTTP 200 with service status, uptime, database connection state, and port.
+- **Rate Limiting**: Protects all execution and LLM endpoints with a 15 request/minute per-IP rate limiter (HTTP 429 with `Retry-After`).
+- **SSRF Guard**: Strict server-side request forgery protection blocking private IP ranges, link-local metadata addresses, and unauthorized loopback ports while allowlisting internal Conduit.
+- **Automatic Seed on Startup**: Automatically initializes SQLite from `data/seed.sqlite` if the database is missing or empty, immediately providing the 4 official benchmark runs and bonus data.
+
+### 1. Build the Docker Image
+```bash
+docker build -t agentic-playwright-dashboard:latest .
+```
+
+### 2. Run the Container
+Pass your `GEMINI_API_KEY` as an environment variable at runtime (secrets are never stored in the image):
+```bash
+docker run -d \
+  --name agentic-dashboard \
+  -p 3050:3050 \
+  -e GEMINI_API_KEY="your_gemini_api_key_here" \
+  -e PORT=3050 \
+  agentic-playwright-dashboard:latest
+```
+
+### 3. Verify Health & Telemetry
+Check the container health endpoint:
+```bash
+curl http://localhost:3050/health
+```
+Expected response:
+```json
+{
+  "status": "ok",
+  "uptimeSeconds": 12,
+  "service": "agentic-playwright-dashboard",
+  "port": 3050,
+  "appBaseUrl": "http://localhost:3000",
+  "database": "connected"
+}
+```
+
+Open your browser at `http://localhost:3050` to access the full agent dashboard.
+
+### 4. Container Logs & Troubleshooting
+```bash
+# View dashboard and entrypoint logs
+docker logs -f agentic-dashboard
+
+# Check container health status
+docker inspect --format='{{json .State.Health}}' agentic-dashboard
+```
 
 ---
 

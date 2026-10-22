@@ -82,6 +82,67 @@ function initDatabase(db: DatabaseSync) {
 
   try { db.exec(`ALTER TABLE pipeline_runs ADD COLUMN approver TEXT;`); } catch {}
   try { db.exec(`ALTER TABLE pipeline_runs ADD COLUMN step_events_json TEXT;`); } catch {}
+
+  seedIfEmpty(db);
+}
+
+function seedIfEmpty(db: DatabaseSync) {
+  if (!fs.existsSync(SEED_PATH)) return;
+  try {
+    const row = db.prepare('SELECT COUNT(*) as count FROM pipeline_runs').get() as any;
+    if (row && row.count === 0) {
+      console.log('Database pipeline_runs is empty. Seeding 4 official runs and bonus data from seed.sqlite...');
+      const seedDb = new DatabaseSync(SEED_PATH);
+      const runs = seedDb.prepare('SELECT * FROM pipeline_runs').all() as any[];
+      const insertRun = db.prepare(`
+        INSERT OR REPLACE INTO pipeline_runs (
+          id, test_case_id, input_json, source_url, retrieval_time,
+          selectors_json, decision_reasons_json, draft_code, critic_feedback,
+          approved_code, approval_status, run_1_status, run_2_status,
+          actual_result, expected_result, evidence_path, unresolved_items_json,
+          approver, step_events_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const r of runs) {
+        insertRun.run(
+          r.id, r.test_case_id, r.input_json, r.source_url, r.retrieval_time,
+          r.selectors_json, r.decision_reasons_json, r.draft_code, r.critic_feedback,
+          r.approved_code, r.approval_status, r.run_1_status, r.run_2_status,
+          r.actual_result, r.expected_result, r.evidence_path, r.unresolved_items_json,
+          r.approver, r.step_events_json, r.created_at, r.updated_at
+        );
+      }
+
+      try {
+        const healings = seedDb.prepare('SELECT * FROM bonus_healing').all() as any[];
+        const insertHeal = db.prepare(`INSERT OR REPLACE INTO bonus_healing (id, test_case_id, failing_selector, proposed_selector, reason, status, execution_result_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        for (const h of healings) {
+          insertHeal.run(h.id, h.test_case_id, h.failing_selector, h.proposed_selector, h.reason, h.status, h.execution_result_json, h.created_at, h.updated_at);
+        }
+      } catch {}
+
+      try {
+        const stabs = seedDb.prepare('SELECT * FROM bonus_stability').all() as any[];
+        const insertStab = db.prepare(`INSERT OR REPLACE INTO bonus_stability (id, test_case_id, total_runs, passed_runs, score_text, runs_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+        for (const s of stabs) {
+          insertStab.run(s.id, s.test_case_id, s.total_runs, s.passed_runs, s.score_text, s.runs_json, s.created_at);
+        }
+      } catch {}
+
+      try {
+        const a11ys = seedDb.prepare('SELECT * FROM bonus_accessibility').all() as any[];
+        const insertA11y = db.prepare(`INSERT OR REPLACE INTO bonus_accessibility (id, url, inspected_at, violations_count, violations_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
+        for (const a of a11ys) {
+          insertA11y.run(a.id, a.url, a.inspected_at, a.violations_count, a.violations_json, a.created_at);
+        }
+      } catch {}
+
+      seedDb.close();
+      console.log('Database seeded successfully on startup.');
+    }
+  } catch (err) {
+    console.warn('Could not check or seed empty database:', err);
+  }
 }
 
 export function savePipelineRun(record: AgentRunRecord): void {

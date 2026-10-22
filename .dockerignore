@@ -1,0 +1,41 @@
+# Secrets and local environment files (CRITICAL: never bake secrets into image)
+.env
+*.env
+.env.*
+!.env.example
+
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Node dependencies (installed during image build)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Demo app repository (cloned fresh during image build)
+conduit-app/
+
+# SQLite live databases (preserve seed database data/seed.sqlite)
+*.sqlite
+*.sqlite3
+*.db
+!data/seed.sqlite
+
+# Build, test, and runtime artifacts
+dist/
+test-results/
+playwright-report/
+blob-report/
+.cache/
+.nyc_output/
+
+# IDE and temporary folders
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+scratch/

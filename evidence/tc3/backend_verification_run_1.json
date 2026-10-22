@@ -1,0 +1,14 @@
+{
+  "verifiedAt": "2026-10-18T12:59:08.320Z",
+  "runNumber": 1,
+  "submitted": {
+    "username": "user_93fd8605",
+    "email": "agent_test_93fd8605@example.com"
+  },
+  "backendRecord": {
+    "id": "cmvdu0rxo000a1wqojfd8vsas",
+    "username": "user_93fd8605",
+    "email": "agent_test_93fd8605@example.com"
+  },
+  "matched": true
+}

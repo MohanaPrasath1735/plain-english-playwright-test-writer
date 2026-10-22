@@ -1,0 +1,20 @@
+{
+  "verifiedAt": "2026-10-18T12:58:11.498Z",
+  "run1": {
+    "username": "user_ed77a022",
+    "email": "agent_test_ed77a022@example.com",
+    "query": "SELECT COUNT(*) FROM User WHERE email = 'agent_test_ed77a022@example.com'",
+    "count": 1,
+    "expected": 1,
+    "passed": true
+  },
+  "rerun": {
+    "username": "user_dfbe7229",
+    "email": "agent_test_9093cfa7@example.com",
+    "query": "SELECT COUNT(*) FROM User WHERE email = 'agent_test_9093cfa7@example.com'",
+    "count": 1,
+    "expected": 1,
+    "passed": true
+  },
+  "noDuplicateAccounts": true
+}

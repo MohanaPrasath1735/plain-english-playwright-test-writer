@@ -1,0 +1,28 @@
+# Environment & Secrets
+.env
+*.env
+.env.local
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Demo App (cloned separately)
+conduit-app/
+
+# Build & Test Artifacts
+dist/
+test-results/
+playwright-report/
+
+# Databases (live databases ignored; seed committed)
+*.sqlite
+*.sqlite3
+*.db
+!data/seed.sqlite
+
+# Logs & System
+*.log
+.DS_Store
+.vscode/
+scratch/

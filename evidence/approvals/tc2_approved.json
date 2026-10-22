@@ -1,0 +1,7 @@
+{
+  "testId": "TC2",
+  "approved": true,
+  "approvedCode": "import { test, expect } from '@playwright/test';\n\ntest.describe('TC2 - Sign up with modified button selector', () => {\n  test('Sign up with altered button selector', async ({ page }) => {\n    const credentials = {\n      username: 'user_c6f0778d',\n      email: 'agent_test_c6f0778d@example.com',\n      password: 'P@ssword_c6f0778d!',\n    };\n\n    await page.goto('http://localhost:3000/register', { waitUntil: 'networkidle' });\n\n    await page.getByPlaceholder('Username').fill(credentials.username);\n    await page.getByPlaceholder('Email').fill(credentials.email);\n    await page.getByPlaceholder('Password').fill(credentials.password);\n\n    // SIMULATED SELECTOR CHANGE / MUTATION:\n    // Targeting an altered selector that does not exist in the DOM\n    await page.locator('button.non-existent-btn-class-changed').click({ timeout: 5000 });\n\n    // State assertion\n    await expect(page.getByRole('link', { name: credentials.username })).toBeVisible({ timeout: 5000 });\n  });\n});\n",
+  "approvedAt": "2026-10-18T12:58:37.273Z",
+  "approvalMode": "manual"
+}

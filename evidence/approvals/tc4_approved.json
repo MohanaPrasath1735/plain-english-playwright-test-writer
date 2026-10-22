@@ -1,0 +1,7 @@
+{
+  "testId": "TC4",
+  "approved": true,
+  "approvedCode": "import { test, expect } from '@playwright/test';\n\ntest.describe('User Registration Flow', () => {\n  const credentials = {\n    username: 'user_649454ea',\n    email: 'agent_test_649454ea@example.com',\n    password: 'P@ssword_649454ea!',\n  };\n\n  test('TC4 - execute sign up with synthetic test data and verify authenticated session', async ({ page }) => {\n    // 1. Navigate to the registration page\n    await page.goto('http://localhost:3000/register', { waitUntil: 'networkidle' });\n\n    // 2. Fill in the registration form\n    const usernameInput = page.getByPlaceholder('Username').or(page.getByRole('textbox', { name: /username/i }));\n    const emailInput = page.getByPlaceholder('Email').or(page.getByRole('textbox', { name: /email/i }));\n    const passwordInput = page.getByPlaceholder('Password');\n\n    await usernameInput.fill(credentials.username);\n    await emailInput.fill(credentials.email);\n    await passwordInput.fill(credentials.password);\n\n    // 3. Submit the registration form\n    const signUpButton = page.getByRole('button', { name: /sign up/i });\n    await signUpButton.click();\n\n    // 4. Assert user profile link or username is visible in dashboard navbar\n    const profileLink = page.getByRole('link', { name: credentials.username });\n    await expect(profileLink).toBeVisible({ timeout: 15000 });\n  });\n});",
+  "approvedAt": "2026-10-18T12:59:27.426Z",
+  "approvalMode": "manual"
+}

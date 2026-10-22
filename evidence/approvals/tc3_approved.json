@@ -1,0 +1,7 @@
+{
+  "testId": "TC3",
+  "approved": true,
+  "approvedCode": "import { test, expect } from '@playwright/test';\n\ntest.describe('TC3 - Sign up flow', () => {\n  test('Sign up and check URL only', async ({ page }) => {\n    // Fresh synthetic credentials (no PII)\n    const credentials = {\n      username: 'user_93fd8605',\n      email: 'agent_test_93fd8605@example.com',\n      password: 'P@ssword_93fd8605!',\n    };\n\n    // Navigate to registration page\n    await page.goto('http://localhost:3000/register', { waitUntil: 'networkidle' });\n\n    // Fill form\n    await page.getByPlaceholder('Username').fill(credentials.username);\n    await page.getByPlaceholder('Email').fill(credentials.email);\n    await page.getByPlaceholder('Password').fill(credentials.password);\n\n    // Submit\n    await page.getByRole('button', { name: 'Sign up' }).click();\n\n    // DRAFT FLAW: only checks URL without state assertion\n    const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';\n    const hostPattern = baseUrl.replace(/^https?:///, '').replace(//$/, '');\n    // REPLACED BY CRITIC: Enforce state assertion instead of URL-only check\n    const userNavLink = page.getByRole('link', { name: credentials.username });\n    await expect(userNavLink).toBeVisible({ timeout: 15000 });\n  });\n});\n",
+  "approvedAt": "2026-10-18T12:59:05.384Z",
+  "approvalMode": "manual"
+}

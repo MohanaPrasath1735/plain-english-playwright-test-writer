@@ -1,0 +1,37 @@
+{
+  "name": "agentic-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dashboard": "tsx src/pipeline/10_webui.ts",
+    "test": "tsx src/index.ts ALL",
+    "test:all": "tsx src/index.ts ALL",
+    "test:tc1": "tsx src/index.ts TC1",
+    "test:tc2": "tsx src/index.ts TC2",
+    "test:tc3": "tsx src/index.ts TC3",
+    "test:tc4": "tsx src/index.ts TC4",
+    "bonus": "tsx src/bonus_runner.ts",
+    "bonus:all": "tsx src/bonus_runner.ts",
+    "bonus:heal": "tsx src/bonus_runner.ts heal-approve"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@google/genai": "^2.30.0",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5",
+    "@types/uuid": "^10.0.0",
+    "dotenv": "^18.0.8",
+    "playwright": "^1.64.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "uuid": "^14.0.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "axe-core": "^4.14.0"
+  }
+}

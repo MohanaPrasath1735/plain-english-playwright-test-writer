@@ -1,0 +1,19 @@
+RAW PLAYWRIGHT ERROR EVIDENCE:
+
+locator.click: Timeout 4000ms exceeded.
+Call log:
+[2m  - waiting for locator('button.non-existent-btn-class-changed')[22m
+
+
+Call log:
+[Run 1][2026-10-18T12:58:37.565Z] Navigating to target URL: http://localhost:3000/register
+[Run 1][2026-10-18T12:58:37.967Z] Browser Console: info: %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold
+[Run 1][2026-10-18T12:58:38.324Z] Browser Console: log: [HMR] connected
+[Run 1][2026-10-18T12:58:40.737Z] Filling credentials (username: user_c6f0778d, email: agent_test_c6f0778d@example.com)
+[Run 1][2026-10-18T12:58:40.877Z] Clicking button using altered selector: button.non-existent-btn-class-changed
+[Run 1][2026-10-18T12:58:44.903Z] Execution failed with error: locator.click: Timeout 4000ms exceeded.
+Call log:
+[2m  - waiting for locator('button.non-existent-btn-class-changed')[22m
+
+[Run 1][2026-10-18T12:58:44.993Z] Screenshot captured at: C:\Users\Mohan\OneDrive\Desktop\Agentic Project\evidence\tc2\run_1_screenshot.png
+[Run 1][2026-10-18T12:58:45.073Z] Playwright Trace saved at: C:\Users\Mohan\OneDrive\Desktop\Agentic Project\evidence\tc2\run_1_trace.zip

@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 import { startWebUI } from '../src/pipeline/10_webui.ts';
 import { validateUrlSafety } from '../src/site_checker/ssrf_guard.ts';
 import { getDatabase, getAllPipelineRuns } from '../src/pipeline/9_store.ts';
-import { getLatestBonusData } from '../src/pipeline/bonus.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,13 +60,6 @@ async function runVerification() {
     if (seedRunIds.length !== 4 || !seedRunIds.includes('TC1') || !seedRunIds.includes('TC4')) {
       throw new Error(`Expected exactly 4 benchmark runs in seed database, got: ${seedRunIds.length}`);
     }
-    const seedHealing = seedDb.prepare('SELECT count(*) as cnt FROM bonus_healing').get();
-    const seedStability = seedDb.prepare('SELECT count(*) as cnt FROM bonus_stability').get();
-    const seedA11y = seedDb.prepare('SELECT count(*) as cnt FROM bonus_accessibility').get();
-    console.log(`Seed bonus records -> Healing: ${seedHealing.cnt}, Stability: ${seedStability.cnt}, A11y: ${seedA11y.cnt}`);
-    if (!seedHealing.cnt || !seedStability.cnt || !seedA11y.cnt) {
-      throw new Error('Seed database is missing one or more bonus records!');
-    }
     seedDb.close();
 
     // Verify live DB has runs seeded
@@ -119,13 +111,13 @@ async function runVerification() {
         {
           hostname: '127.0.0.1',
           port: TEST_PORT,
-          path: '/api/pipeline/approve',
+          path: '/api/site-check/run',
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
         },
-        JSON.stringify({ runId: 'fake_run' })
+        JSON.stringify({ url: 'http://localhost:3000' })
       );
 
       if (res.statusCode === 429) {

@@ -1,21 +1,7 @@
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getAllPipelineRuns, getPipelineRun, getCustomPipelineRuns } from './9_store.js';
-import {
-  prepareDraftTest,
-  approveAndExecuteTest,
-  rejectDraftTest,
-} from './orchestrator.js';
-import { isQuotaOrRateLimitError } from '../llm.js';
-import {
-  getLatestBonusData,
-  proposeTC2SelfHealing,
-  approveAndExecuteTC2Healing,
-  calculateTC1StabilityScore,
-  runAccessibilityCheck,
-  checkDemoAppReachable,
-} from './bonus.js';
+import { getAllPipelineRuns, getPipelineRun } from './9_store.js';
 import { runSiteCheck } from '../site_checker/site_checker.js';
 import { getAllSiteCheckRecords, deleteSiteCheckRecord, clearAllSiteCheckRecords } from '../site_checker/store.js';
 import { executeSiteCheckProposal } from '../site_checker/proposal_runner.js';
@@ -64,8 +50,7 @@ function parseJsonBody(req: http.IncomingMessage): Promise<any> {
 /**
  * Step 10: Small Web UI
  * Traceable test file and run results keyed by input record ID,
- * with unresolved items clearly displayed, downloadable evidence,
- * and separate Bonus features section.
+ * with unresolved items clearly displayed and downloadable evidence.
  */
 export function startWebUI(port: number = PORT): http.Server {
   const server = http.createServer(async (req, res) => {
@@ -130,17 +115,6 @@ export function startWebUI(port: number = PORT): http.Server {
       return;
     }
 
-    // API endpoint for custom runs
-    if (url.pathname === '/api/custom-runs' && req.method === 'GET') {
-      const customRuns = getCustomPipelineRuns();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        success: true,
-        runs: customRuns,
-        rowsHtml: customRuns.map(run => renderCustomRunRow(run)).join(''),
-      }));
-      return;
-    }
 
     // API endpoint for site checks list
     if (url.pathname === '/api/site-checks' && req.method === 'GET') {
@@ -284,230 +258,6 @@ export function startWebUI(port: number = PORT): http.Server {
       return;
     }
 
-    // Streaming API: Draft new test scenario with live step-by-step progress
-    if (url.pathname === '/api/pipeline/draft-stream' && req.method === 'POST') {
-      if (!checkExecutionRateLimit(req, res)) return;
-      res.writeHead(200, {
-        'Content-Type': 'application/x-ndjson',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
-      });
-
-      const writeEvent = (payload: any) => {
-        try {
-          res.write(JSON.stringify(payload) + '\n');
-        } catch {}
-      };
-
-      try {
-        const body = await parseJsonBody(req);
-        const flow = body.flow_description;
-        const expected = body.expected_end_state;
-        if (!flow || !expected) {
-          writeEvent({ type: 'error', error: 'flow_description and expected_end_state are required.' });
-          res.end();
-          return;
-        }
-
-        const testCaseId = body.testCaseId || `TEST_${Date.now()}`;
-        const options = body.options || {};
-
-        const record = await prepareDraftTest(
-          {
-            id: testCaseId,
-            flow_description: flow,
-            expected_end_state: expected,
-          },
-          options,
-          (progress) => {
-            writeEvent({ type: 'progress', data: progress });
-          }
-        );
-
-        writeEvent({ type: 'done', success: true, run: record });
-        res.end();
-      } catch (err: any) {
-        const isQuota = isQuotaOrRateLimitError(err);
-        const errorMsg = isQuota
-          ? `Gemini API Quota / Rate Limit Exceeded (HTTP 429). Execution stopped immediately without silent retries. Please check your Gemini API quota.`
-          : (err?.message || String(err));
-        writeEvent({ type: 'error', success: false, error: errorMsg, isQuota });
-        res.end();
-      }
-      return;
-    }
-
-    // Pipeline API: Draft new test scenario (Steps 1-5, halts in PENDING_APPROVAL)
-    if (url.pathname === '/api/pipeline/draft' && req.method === 'POST') {
-      if (!checkExecutionRateLimit(req, res)) return;
-      try {
-        const body = await parseJsonBody(req);
-        const flow = body.flow_description;
-        const expected = body.expected_end_state;
-        if (!flow || !expected) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'flow_description and expected_end_state are required.' }));
-          return;
-        }
-        const testCaseId = body.testCaseId || `TEST_${Date.now()}`;
-        const options = body.options || {};
-        const record = await prepareDraftTest({
-          id: testCaseId,
-          flow_description: flow,
-          expected_end_state: expected,
-        }, options);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, run: record }));
-      } catch (err: any) {
-        const isQuota = isQuotaOrRateLimitError(err);
-        res.writeHead(isQuota ? 429 : 500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          success: false,
-          error: isQuota
-            ? 'Gemini API Quota / Rate Limit Exceeded (HTTP 429). Execution stopped immediately.'
-            : (err?.message || String(err)),
-          isQuota,
-        }));
-      }
-      return;
-    }
-
-    // Pipeline API: Approve and execute test run (Steps 6-8, blocks duplicate retries)
-    if (url.pathname === '/api/pipeline/approve' && req.method === 'POST') {
-      if (!checkExecutionRateLimit(req, res)) return;
-      try {
-        const body = await parseJsonBody(req);
-        const runId = body.runId;
-        const approver = body.approver || 'human';
-        if (!runId) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'runId is required.' }));
-          return;
-        }
-        const record = await approveAndExecuteTest(runId, approver);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, run: record }));
-      } catch (err: any) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-      }
-      return;
-    }
-
-    // Pipeline API: Reject draft test
-    if (url.pathname === '/api/pipeline/reject' && req.method === 'POST') {
-      try {
-        const body = await parseJsonBody(req);
-        const runId = body.runId;
-        const approver = body.approver || 'human';
-        const reason = body.reason || 'Rejected by human reviewer';
-        if (!runId) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'runId is required.' }));
-          return;
-        }
-        const record = await rejectDraftTest(runId, approver, reason);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, run: record }));
-      } catch (err: any) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: err?.message || String(err) }));
-      }
-      return;
-    }
-
-    // Bonus API: Approve & execute TC2 self-healing
-    if (url.pathname === '/api/bonus/heal-tc2' && req.method === 'POST') {
-      if (!checkExecutionRateLimit(req, res)) return;
-      try {
-        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-        const reachability = await checkDemoAppReachable(baseUrl);
-        if (!reachability.reachable) {
-          const errMsg = reachability.error || `Demo app is not reachable at ${baseUrl}`;
-          res.writeHead(503, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: errMsg }));
-          return;
-        }
-
-        const result = await approveAndExecuteTC2Healing();
-        if (result.status === 'APPROVED_FAILED') {
-          res.writeHead(422, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            success: false,
-            error: result.executionResult?.error || 'Healed spec execution failed',
-            result,
-          }));
-          return;
-        }
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, result }));
-      } catch (err: any) {
-        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-        const rawErr = err?.message || String(err);
-        const errorMsg = (rawErr.includes('ECONNREFUSED') || rawErr.includes('ERR_CONNECTION_REFUSED') || rawErr.includes('fetch failed'))
-          ? `Demo app is not reachable at ${baseUrl}`
-          : rawErr;
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: errorMsg }));
-      }
-      return;
-    }
-
-    // Bonus API: Run TC1 3x stability score
-    if (url.pathname === '/api/bonus/run-stability' && req.method === 'POST') {
-      if (!checkExecutionRateLimit(req, res)) return;
-      try {
-        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-        const reachability = await checkDemoAppReachable(baseUrl);
-        if (!reachability.reachable) {
-          res.writeHead(503, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: reachability.error || `Demo app is not reachable at ${baseUrl}` }));
-          return;
-        }
-
-        const result = await calculateTC1StabilityScore(3);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, result }));
-      } catch (err: any) {
-        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-        const rawErr = err?.message || String(err);
-        const errorMsg = (rawErr.includes('ECONNREFUSED') || rawErr.includes('ERR_CONNECTION_REFUSED') || rawErr.includes('fetch failed'))
-          ? `Demo app is not reachable at ${baseUrl}`
-          : rawErr;
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: errorMsg }));
-      }
-      return;
-    }
-
-    // Bonus API: Run accessibility check
-    if (url.pathname === '/api/bonus/run-a11y' && req.method === 'POST') {
-      if (!checkExecutionRateLimit(req, res)) return;
-      try {
-        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-        const reachability = await checkDemoAppReachable(baseUrl);
-        if (!reachability.reachable) {
-          res.writeHead(503, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: reachability.error || `Demo app is not reachable at ${baseUrl}` }));
-          return;
-        }
-
-        const result = await runAccessibilityCheck();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, result }));
-      } catch (err: any) {
-        const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
-        const rawErr = err?.message || String(err);
-        const errorMsg = (rawErr.includes('ECONNREFUSED') || rawErr.includes('ERR_CONNECTION_REFUSED') || rawErr.includes('fetch failed'))
-          ? `Demo app is not reachable at ${baseUrl}`
-          : rawErr;
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, error: errorMsg }));
-      }
-      return;
-    }
-
     // HTML Site Check Page
     if (url.pathname === '/site-check') {
       const records = getAllSiteCheckRecords();
@@ -553,7 +303,6 @@ function renderDashboardHtml(runs: any[]): string {
   const targetOrder = ['TC1', 'TC2', 'TC3', 'TC4'];
   const latestRunsMap = new Map<string, any>();
   const historicalRuns: any[] = [];
-  const customRuns: any[] = [];
 
   for (const run of runs) {
     if (targetOrder.includes(run.testCaseId)) {
@@ -562,8 +311,6 @@ function renderDashboardHtml(runs: any[]): string {
       } else {
         historicalRuns.push(run);
       }
-    } else {
-      customRuns.push(run);
     }
   }
 
@@ -575,20 +322,6 @@ function renderDashboardHtml(runs: any[]): string {
   const passedActive = activeRuns.filter(r => r.testCaseId !== 'TC2' && r.run1Status === 'PASSED').length;
   const failedAsExpected = activeRuns.filter(r => r.testCaseId === 'TC2' && r.run1Status === 'FAILED').length;
   const dbVerifiedCount = activeRuns.filter(r => r.testCaseId !== 'TC2').length;
-
-  const bonusData = getLatestBonusData();
-  const proposal = bonusData.proposal || {
-    id: 'heal_tc2_proposal',
-    testCaseId: 'TC2',
-    failingSelector: 'button.non-existent-btn-class-changed',
-    proposedSelector: "page.getByRole('button', { name: 'Sign up' })",
-    reason: "The selector 'button.non-existent-btn-class-changed' failed because it does not match anything on /register. Re-inspection located an active button with role='button' and accessible name 'Sign up'. Replacing the broken class selector with getByRole provides semantic resilience against styling changes.",
-    status: 'AWAITING_APPROVAL',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  const stability = bonusData.stability;
-  const accessibility = bonusData.accessibility;
 
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -829,13 +562,7 @@ function renderDashboardHtml(runs: any[]): string {
       color: var(--text-muted);
     }
 
-    /* Panels & Card Containers */
-    #newTestPanel, #cardHealing, #cardStability, #cardA11y {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      box-shadow: var(--shadow);
-    }
+
 
     /* Table Containers */
     .table-container {
@@ -1121,29 +848,7 @@ function renderDashboardHtml(runs: any[]): string {
       color: #06221c;
       border-color: var(--accent);
     }
-    #draftTestBtn, #runBonusSuiteBtn {
-      background: var(--accent) !important;
-      color: #06221c !important;
-      border-color: var(--accent) !important;
-      box-shadow: 0 4px 14px var(--accent-glow) !important;
-      font-weight: 700;
-    }
-    #draftTestBtn:hover, #runBonusSuiteBtn:hover {
-      background: var(--accent-hover) !important;
-      transform: translateY(-1px);
-    }
-    #approveDraftBtn, #approveHealingBtn {
-      background: var(--success) !important;
-      color: #042f1a !important;
-      border-color: var(--success) !important;
-      font-weight: 700;
-    }
-    #rejectDraftBtn {
-      background: var(--danger) !important;
-      color: #3b070c !important;
-      border-color: var(--danger) !important;
-      font-weight: 700;
-    }
+
     .timeline-toggle-btn {
       background: var(--accent-dim) !important;
       border-color: rgba(46, 230, 197, 0.45) !important;
@@ -1465,16 +1170,7 @@ function renderDashboardHtml(runs: any[]): string {
       border-color: rgba(46, 230, 197, 0.4);
       font-weight: 700;
     }
-    .nav-bonus-badge {
-      font-size: 10.5px;
-      font-weight: 800;
-      text-transform: uppercase;
-      padding: 2px 7px;
-      border-radius: 999px;
-      background: linear-gradient(135deg, #0284c7, #38bdf8);
-      color: #ffffff;
-      letter-spacing: 0.04em;
-    }
+
     .nav-right-cluster {
       display: flex;
       align-items: center;
@@ -1536,7 +1232,6 @@ function renderDashboardHtml(runs: any[]): string {
     [data-theme="light"] .nav-link { color: #475569; }
     [data-theme="light"] .nav-link:hover { color: var(--accent); background: var(--accent-dim); }
     [data-theme="light"] .nav-link.active { color: var(--accent); background: var(--accent-dim); border-color: var(--accent); }
-    [data-theme="light"] .nav-bonus-badge { background: var(--accent); color: #ffffff; box-shadow: none; }
     [data-theme="light"] .theme-toggle-btn { background: #f1f5f9; border-color: #cbd5e1; color: #0f172a; }
     [data-theme="light"] .theme-toggle-btn:hover { background: #ffffff; border-color: var(--accent); color: var(--accent); }
 
@@ -1727,11 +1422,7 @@ function renderDashboardHtml(runs: any[]): string {
       color: #0f172a;
       border-color: var(--border);
     }
-    [data-theme="light"] #newTestPanel {
-      background: #ffffff;
-      border-color: var(--border);
-      box-shadow: var(--shadow);
-    }
+
     [data-theme="light"] .scope-badge-box {
       background: #f1f5f9 !important;
       border-color: var(--border) !important;
@@ -1740,34 +1431,7 @@ function renderDashboardHtml(runs: any[]): string {
     [data-theme="light"] .scope-badge-box code {
       color: #0f172a !important;
     }
-    [data-theme="light"] #draftProgressContainer {
-      background: #ffffff !important;
-      border: 1.5px solid var(--border) !important;
-      box-shadow: var(--shadow) !important;
-    }
-    [data-theme="light"] #draftProgressContainer div[id^="pStep_"] {
-      background: #f8fafc !important;
-      border: 1px solid #e2e8f0 !important;
-    }
-    [data-theme="light"] #draftProgressContainer strong {
-      color: #334155 !important;
-    }
-    [data-theme="light"] #draftProgressContainer div[id^="pMsg_"] {
-      color: #475569 !important;
-    }
-    [data-theme="light"] #draftStatusBanner {
-      color: #334155 !important;
-      border-top-color: #e2e8f0 !important;
-    }
-    [data-theme="light"] #pendingApprovalContainer {
-      background: #ffffff !important;
-      border: 2px solid #b45309 !important;
-      box-shadow: var(--shadow) !important;
-    }
-    [data-theme="light"] #pendingApprovalContainer .pending-info-box {
-      background: #f8fafc !important;
-      border: 1px solid #e2e8f0 !important;
-    }
+
 
     /* Buttons in Light Mode */
     [data-theme="light"] .btn {
@@ -1780,29 +1444,7 @@ function renderDashboardHtml(runs: any[]): string {
       border-color: var(--accent);
       color: var(--accent);
     }
-    [data-theme="light"] #draftTestBtn,
-    [data-theme="light"] #runBonusSuiteBtn {
-      background: var(--accent) !important;
-      color: #ffffff !important;
-      border-color: var(--accent) !important;
-      box-shadow: none !important;
-    }
-    [data-theme="light"] #draftTestBtn:hover,
-    [data-theme="light"] #runBonusSuiteBtn:hover {
-      background: var(--accent-hover) !important;
-      border-color: var(--accent-hover) !important;
-    }
-    [data-theme="light"] #approveDraftBtn,
-    [data-theme="light"] #approveHealingBtn {
-      background: #166534 !important;
-      color: #ffffff !important;
-      border-color: #166534 !important;
-    }
-    [data-theme="light"] #rejectDraftBtn {
-      background: #991b1b !important;
-      color: #ffffff !important;
-      border-color: #991b1b !important;
-    }
+
     [data-theme="light"] .timeline-toggle-btn {
       background: #ccfbf1 !important;
       border-color: #99f6e4 !important;
@@ -1812,70 +1454,7 @@ function renderDashboardHtml(runs: any[]): string {
       background: #99f6e4 !important;
     }
 
-    /* Bonus Cards in Light Mode */
-    [data-theme="light"] .bonus-section-container {
-      background: #f1f5f9 !important;
-      border: 1.5px dashed #cbd5e1 !important;
-    }
-    [data-theme="light"] #cardHealing,
-    [data-theme="light"] #cardStability,
-    [data-theme="light"] #cardA11y {
-      background: #ffffff;
-      border-color: var(--border);
-      box-shadow: var(--shadow);
-    }
-    [data-theme="light"] .bonus-card-title {
-      color: #0f172a !important;
-    }
-    [data-theme="light"] .bonus-fail-label {
-      color: #991b1b !important;
-    }
-    [data-theme="light"] .bonus-pass-label {
-      color: #166534 !important;
-    }
-    [data-theme="light"] .code-pill-fail {
-      background: #fee2e2 !important;
-      color: #991b1b !important;
-      border: 1px solid #fca5a5 !important;
-    }
-    [data-theme="light"] .code-pill-pass {
-      background: #dcfce7 !important;
-      color: #166534 !important;
-      border: 1px solid #86efac !important;
-    }
-    [data-theme="light"] .healed-result-pass {
-      background: #f0fdf4 !important;
-      border-color: #86efac !important;
-    }
-    [data-theme="light"] .healed-result-pass .healed-title {
-      color: #166534 !important;
-    }
-    [data-theme="light"] .healed-result-fail {
-      background: #fef2f2 !important;
-      border-color: #fca5a5 !important;
-    }
-    [data-theme="light"] .healed-result-fail .healed-title {
-      color: #991b1b !important;
-    }
-    [data-theme="light"] .stability-run-item {
-      background: #f8fafc !important;
-      border: 1px solid #e2e8f0 !important;
-      color: #0f172a !important;
-    }
-    [data-theme="light"] .a11y-violation-item {
-      background: #f8fafc !important;
-      border: 1px solid #e2e8f0 !important;
-      color: #0f172a !important;
-    }
-    [data-theme="light"] .a11y-violation-id {
-      color: #0f766e !important;
-    }
-    [data-theme="light"] .a11y-violation-desc {
-      color: #0f172a !important;
-    }
-    [data-theme="light"] .a11y-violation-link {
-      color: #0f766e !important;
-    }
+
     [data-theme="light"] .draft-preview-rejected {
       background: #fff1f2 !important;
       border-color: #fecdd3 !important;
@@ -1926,10 +1505,6 @@ function renderDashboardHtml(runs: any[]): string {
       .title-group h1 { font-size: 28px; }
       .metrics { gap: 12px; }
     }
-    .btn-preset {
-      font-size: 11.5px;
-      padding: 5px 10px;
-    }
 
     @media (max-width: 768px) {
       .header { flex-direction: column; align-items: stretch; }
@@ -1944,11 +1519,6 @@ function renderDashboardHtml(runs: any[]): string {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-      }
-      .btn-preset {
-        min-height: 38px;
-        font-size: 12px;
-        padding: 8px 12px;
       }
       .timeline-toggle-btn {
         min-height: 38px !important;
@@ -1971,206 +1541,12 @@ function renderDashboardHtml(runs: any[]): string {
   <div class="header">
     <div class="title-group">
       <span class="hero-kicker">⚡ Autonomous Pipeline Architecture</span>
-      <h1>Plain English in. Approved, verified test out.</h1>
-      <p class="hero-line">Turns a plain-English user flow into an approved Playwright spec, then runs it against Conduit with critic review, evidence, and database proof.</p>
+      <h1>Plain-English Playwright Test Writer: official test runs with evidence, plus a live Site Check.</h1>
+      <p class="hero-line">Official test runs with evidence, plus a live Site Check.</p>
     </div>
     <div>
       <span class="badge badge-tc" style="font-size: 13.5px; padding: 9px 16px; border-radius: 8px;">Target: <code>${process.env.APP_BASE_URL || 'http://localhost:3000'}</code></span>
     </div>
-  </div>
-
-  <!-- NEW TEST PANEL -->
-  <div id="newTestPanel" style="padding: 24px 26px; margin-bottom: 28px;">
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
-      <div>
-        <h2 style="font-size: 19px; font-weight: 800; color: var(--card-title-color, var(--text)); display: flex; align-items: center; gap: 10px;">
-          <span>📝 New Test Scenario</span>
-          <span class="badge badge-tc" style="font-size: 11.5px;">Interactive Agent Flow</span>
-        </h2>
-        <p style="font-size: 13.5px; color: var(--text-muted); margin-top: 3px;">
-          Draft an automated Playwright test from a plain-English scenario. The agent runs Steps 1–5 (Understand, Browse, Reason, Draft, Critic) and halts for human approval before execution.
-        </p>
-      </div>
-      <div class="scope-badge-box" style="background: rgba(15, 23, 42, 0.9); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 12px; color: var(--text-muted);">
-        <strong style="color: var(--accent);">Scope:</strong> <code style="color: var(--text);">${process.env.APP_BASE_URL || 'http://localhost:3000'}</code>
-      </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-bottom: 14px;">
-      <div>
-        <label for="scenarioInput" style="display: block; font-size: 12px; font-weight: 700; color: var(--label-color, var(--text)); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px;">
-          Plain-English Scenario / Flow Description:
-        </label>
-        <textarea id="scenarioInput" rows="3" style="width: 100%; border-radius: 6px; padding: 8px 10px; font-family: inherit; font-size: 13px; resize: vertical;" placeholder="e.g. Navigate to sign up page, enter unique username, email, and password, click Sign up button, and see dashboard navbar with logged-in user"></textarea>
-      </div>
-      <div>
-        <label for="expectedInput" style="display: block; font-size: 12px; font-weight: 700; color: var(--label-color, var(--text)); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px;">
-          Expected End State / Assertions:
-        </label>
-        <textarea id="expectedInput" rows="3" style="width: 100%; border-radius: 6px; padding: 8px 10px; font-family: inherit; font-size: 13px; resize: vertical;" placeholder="e.g. User record is created in SQLite, session is established, and user profile link is visible in dashboard navbar"></textarea>
-      </div>
-    </div>
-
-    <!-- Quick Scenario Presets and Draft Button -->
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-        <span style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Scenario Presets:</span>
-        <button type="button" class="btn btn-preset" onclick="fillScenario('TC1')">TC1: Registration</button>
-        <button type="button" class="btn btn-preset" onclick="fillScenario('TC2')">TC2: Mutated Button (Negative)</button>
-        <button type="button" class="btn btn-preset" onclick="fillScenario('TC3')">TC3: Critic Upgrade</button>
-        <button type="button" class="btn btn-preset" onclick="fillScenario('TC4')">TC4: Fresh Data & DB Proof</button>
-      </div>
-      <button id="draftTestBtn" class="btn" style="font-weight: 700; font-size: 13px; padding: 8px 18px;">
-        🚀 Draft test (Steps 1–5)
-      </button>
-    </div>
-    <div id="newTestFeedback" style="margin-top: 10px;"></div>
-
-    <!-- LIVE DRAFT PROGRESS PANEL -->
-    <div id="draftProgressContainer" style="display: none; margin-top: 16px; padding: 18px 20px; background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span id="draftProgressBadge" class="badge badge-warn" style="font-size: 12px; font-weight: 700; padding: 4px 10px;">⏳ Drafting in Progress</span>
-          <span style="font-size: 13px; font-weight: 600; color: #f1f5f9;">Live Pipeline Execution</span>
-        </div>
-        <div style="font-family: monospace; font-size: 13px; color: #38bdf8; font-weight: 700; background: rgba(56, 189, 248, 0.1); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.25);">
-          ⏱️ Elapsed: <span id="draftElapsedTime">0.0s</span>
-        </div>
-      </div>
-
-      <!-- 5 Steps Grid -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px;">
-        <!-- Step 1: Understand -->
-        <div id="pStep_understand" style="background: rgba(0,0,0,0.35); border: 1px solid #1e293b; border-radius: 8px; padding: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <strong style="font-size: 12px; color: #94a3b8;">1. Understand</strong>
-            <span id="pBadge_understand" class="badge" style="font-size: 10px; padding: 1px 6px;">Queued</span>
-          </div>
-          <div id="pMsg_understand" style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Waiting...</div>
-        </div>
-
-        <!-- Step 2: Browse -->
-        <div id="pStep_browse" style="background: rgba(0,0,0,0.35); border: 1px solid #1e293b; border-radius: 8px; padding: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <strong style="font-size: 12px; color: #94a3b8;">2. Browse</strong>
-            <span id="pBadge_browse" class="badge" style="font-size: 10px; padding: 1px 6px;">Queued</span>
-          </div>
-          <div id="pMsg_browse" style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Waiting...</div>
-        </div>
-
-        <!-- Step 3: Reason -->
-        <div id="pStep_reason" style="background: rgba(0,0,0,0.35); border: 1px solid #1e293b; border-radius: 8px; padding: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <strong style="font-size: 12px; color: #94a3b8;">3. Reason</strong>
-            <span id="pBadge_reason" class="badge" style="font-size: 10px; padding: 1px 6px;">Queued</span>
-          </div>
-          <div id="pMsg_reason" style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Waiting...</div>
-        </div>
-
-        <!-- Step 4: Draft -->
-        <div id="pStep_draft" style="background: rgba(0,0,0,0.35); border: 1px solid #1e293b; border-radius: 8px; padding: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <strong style="font-size: 12px; color: #94a3b8;">4. Draft (LLM)</strong>
-            <span id="pBadge_draft" class="badge" style="font-size: 10px; padding: 1px 6px;">Queued</span>
-          </div>
-          <div id="pMsg_draft" style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Waiting...</div>
-        </div>
-
-        <!-- Step 5: Critic -->
-        <div id="pStep_critic" style="background: rgba(0,0,0,0.35); border: 1px solid #1e293b; border-radius: 8px; padding: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-            <strong style="font-size: 12px; color: #94a3b8;">5. Critic</strong>
-            <span id="pBadge_critic" class="badge" style="font-size: 10px; padding: 1px 6px;">Queued</span>
-          </div>
-          <div id="pMsg_critic" style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Waiting...</div>
-        </div>
-      </div>
-
-      <!-- Live status message banner -->
-      <div id="draftStatusBanner" style="font-size: 12.5px; color: #cbd5e1; padding-top: 6px; border-top: 1px solid #1e293b;"></div>
-    </div>
-
-    <!-- PENDING HUMAN APPROVAL STATE CONTAINER -->
-    <div id="pendingApprovalContainer" style="display: none; margin-top: 18px; padding: 18px 20px; background: rgba(15, 23, 42, 0.95); border: 2px solid #f59e0b; border-radius: 10px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span class="badge badge-warn" style="font-size: 12px; font-weight: 700; padding: 4px 10px;">⏳ Pending human approval</span>
-          <span id="pendingRunId" class="badge badge-tc" style="font-size: 11.5px;"></span>
-        </div>
-        <div style="font-size: 12px; color: var(--warning); font-weight: 500;">
-          Pipeline halted at Step 5 (Critic). Execution will not start until approved by human.
-        </div>
-      </div>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-bottom: 14px;">
-        <div class="pending-info-box" style="background: rgba(0,0,0,0.3); border: 1px solid #1e293b; border-radius: 6px; padding: 10px;">
-          <strong style="color: var(--flow-title); font-size: 12.5px; display: block; margin-bottom: 4px;">Reasoned Selectors & Locators:</strong>
-          <div id="pendingSelectors" tabindex="0" style="font-size: 11.5px; color: var(--text); max-height: 90px; overflow-y: auto;"></div>
-        </div>
-        <div class="pending-info-box" style="background: rgba(0,0,0,0.3); border: 1px solid #1e293b; border-radius: 6px; padding: 10px;">
-          <strong style="color: var(--success); font-size: 12.5px; display: block; margin-bottom: 4px;">Assertions & Critic Review Result:</strong>
-          <div id="pendingCritic" tabindex="0" style="font-size: 11.5px; color: var(--text); max-height: 90px; overflow-y: auto;"></div>
-        </div>
-      </div>
-
-      <div style="margin-bottom: 14px;">
-        <strong style="color: var(--label-color, var(--text)); font-size: 12.5px; display: block; margin-bottom: 4px;">Draft Playwright Spec Code:</strong>
-        <pre id="pendingSpecCode" class="code-preview" tabindex="0" style="max-height: 180px; font-size: 11px;"></pre>
-      </div>
-
-      <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #334155; padding-top: 12px; flex-wrap: wrap; gap: 10px;">
-        <div style="font-size: 12px; color: var(--text-muted);">
-          Approver will be recorded as <code>human</code> with real execution timestamp. Duplicate retries are blocked.
-        </div>
-        <div style="display: flex; gap: 10px;">
-          <button id="rejectDraftBtn" class="btn" style="font-weight: 700; padding: 7px 16px;">
-            ✖ Reject
-          </button>
-          <button id="approveDraftBtn" class="btn" style="font-weight: 700; padding: 7px 20px;">
-            ✓ Approve & Execute Test
-          </button>
-        </div>
-      </div>
-      <div id="approvalActionFeedback" style="margin-top: 10px;"></div>
-    </div>
-  </div>
-
-  <!-- CUSTOM SCENARIO RUNS SECTION -->
-  <div class="table-container" id="customScenariosSection" style="margin-bottom: 36px;">
-    <div class="table-header-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <span>Custom scenario runs</span>
-        <span id="customRunsCountBadge" class="badge badge-tc" style="font-size: 11px;">${customRuns.length} run${customRuns.length === 1 ? '' : 's'}</span>
-      </div>
-      <div style="font-size: 12px; color: var(--text-muted); font-family: var(--body); font-weight: normal;">
-        Interactive agent runs drafted from the panel above
-      </div>
-    </div>
-
-    <div id="noCustomRunsBox" class="empty-state-box" style="display: ${customRuns.length === 0 ? 'block' : 'none'};">
-      <div class="empty-state-icon">📋</div>
-      <div class="empty-state-title">No custom scenarios yet. Describe a flow above.</div>
-      <div class="empty-state-sub">
-        Draft a new test scenario using the panel above to see execution results, evidence links, and agent timelines here.
-      </div>
-    </div>
-
-    <table class="runs-table" id="customRunsTable" style="display: ${customRuns.length === 0 ? 'none' : 'table'};">
-      <thead>
-        <tr>
-          <th class="col-tc">Test Case</th>
-          <th class="col-flow">Flow &amp; Expected State</th>
-          <th class="col-source">Source &amp; Inspected</th>
-          <th class="col-approval">Approval &amp; Critic Review</th>
-          <th class="col-run-result">Run Result</th>
-          <th class="col-observed">Observed vs Intended</th>
-          <th class="col-evidence">Evidence</th>
-        </tr>
-      </thead>
-      <tbody id="customRunsTbody">
-        ${customRuns.map(run => renderCustomRunRow(run)).join('')}
-      </tbody>
-    </table>
   </div>
 
   <div class="metrics">
@@ -2259,391 +1635,9 @@ function renderDashboardHtml(runs: any[]): string {
     </div>
   </div>
 
-  <!-- SEPARATE BONUS SECTION -->
-  <div class="bonus-section-container" style="margin-top: 52px; padding: 32px; background: var(--bg-elevated); border: 1px dashed rgba(46, 230, 197, 0.35); border-radius: 18px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-      <div>
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <h2 style="font-size: 24px; font-weight: 800; color: var(--text);">Bonus Features</h2>
-          <span class="badge badge-warn" style="font-size: 13px; font-weight: 700;">SEPARATE EVALUATION</span>
-        </div>
-        <p style="font-size: 15px; color: var(--text-muted); margin-top: 6px;">
-          Advanced agent extensions: self-healing locator suggestions, multi-run stability scoring, and axe-core accessibility auditing.
-        </p>
-      </div>
-      <div style="display: flex; gap: 10px;">
-        <button id="runBonusSuiteBtn" class="btn" style="font-weight: 600;">⚡ Run Full Bonus Suite</button>
-      </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px;">
-      <!-- Bonus 1: Self-Healing for TC2 -->
-      <div id="cardHealing" style="padding: 22px; display: flex; flex-direction: column; justify-content: space-between;">
-        <div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-            <h3 class="bonus-card-title" style="font-size: 18px; font-weight: 700; color: var(--card-title-color, #f1f5f9);">1. Self-Healing Selector (TC2)</h3>
-            <span id="healingStatusBadge" class="badge ${proposal.status === 'APPROVED_PASSED' ? 'badge-pass' : (proposal.status === 'APPROVED_FAILED' ? 'badge-fail' : 'badge-warn')}">
-              ${proposal.status === 'APPROVED_PASSED' ? '✓ Approved & Verified' : (proposal.status === 'APPROVED_FAILED' ? '✖ Execution Failed' : 'Proposed fix, awaiting approval')}
-            </span>
-          </div>
-          <div style="font-size: 14px; margin-bottom: 8px;">
-            <strong class="bonus-fail-label" style="color: var(--danger, #f87171);">Failing Selector:</strong>
-            <code class="code-pill-fail" style="background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 4px; color: #fca5a5;">${proposal.failingSelector}</code>
-          </div>
-          <div style="font-size: 14px; margin-bottom: 8px;">
-            <strong class="bonus-pass-label" style="color: var(--success, #34d399);">Proposed Selector:</strong>
-            <code class="code-pill-pass" style="background: rgba(0,0,0,0.4); padding: 2px 6px; border-radius: 4px; color: #86efac;">${proposal.proposedSelector}</code>
-          </div>
-          <div style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px;">
-            <strong>Reason:</strong> ${escapeHtml(proposal.reason)}
-          </div>
-          <div id="healingResultBox">
-            ${proposal.executionResult ? (
-              proposal.executionResult.status === 'PASSED' ? `
-                <div class="healed-result-pass" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-                  <div class="healed-title" style="font-weight: 700; color: var(--success, #34d399); font-size: 14px; margin-bottom: 4px;">Healed Spec Run: ${proposal.executionResult.status} (${proposal.executionResult.durationMs}ms)</div>
-                  <div style="font-size: 12px; color: var(--text-muted);">Executed with fresh synthetic user "${proposal.executionResult.username}" and verified in database.</div>
-                  <div style="display: flex; gap: 8px; margin-top: 10px;">
-                    <a class="btn" href="/evidence/tc2/tc2_healed.spec.ts" target="_blank">📄 Healed Spec</a>
-                    <a class="btn" href="/evidence/tc2/tc2_healed_screenshot.png" target="_blank">📷 Screenshot</a>
-                    <a class="btn" href="/evidence/tc2/tc2_healed_trace.zip" target="_blank">🔍 Trace</a>
-                  </div>
-                </div>
-              ` : `
-                <div class="healed-result-fail" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-                  <div class="healed-title" style="font-weight: 700; color: var(--danger, #f87171); font-size: 14px; margin-bottom: 4px;">Healed Spec Run: FAILED (${proposal.executionResult.durationMs}ms)</div>
-                  <div style="font-size: 12px; color: #fca5a5; word-break: break-word;">${escapeHtml(proposal.executionResult.error || 'Execution failed')}</div>
-                  <div style="display: flex; gap: 8px; margin-top: 10px;">
-                    <a class="btn" href="/evidence/tc2/tc2_healed.spec.ts" target="_blank">📄 Healed Spec</a>
-                    <a class="btn" href="/evidence/tc2/tc2_healed_screenshot.png" target="_blank">📷 Screenshot</a>
-                    <a class="btn" href="/evidence/tc2/tc2_healed_trace.zip" target="_blank">🔍 Trace</a>
-                  </div>
-                </div>
-              `
-            ) : ''}
-          </div>
-        </div>
-        <div>
-          <div id="healingActionArea" style="border-top: 1px solid var(--border); padding-top: 16px;">
-            ${!proposal.status.startsWith('APPROVED') ? `
-              <div style="font-size: 12px; color: var(--warning, #fbbf24); margin-bottom: 10px;">
-                ⚠ Human approval required. Clicking Approve will apply the fix to a separate spec copy (<code>tc2_healed.spec.ts</code>) and execute it. Never applied automatically.
-              </div>
-              <button id="approveHealingBtn" class="btn" onclick="window.approveHealing()" style="width: 100%; justify-content: center; font-weight: 700;">
-                ✓ Approve & Run Healed Spec
-              </button>
-            ` : `
-              <div style="font-size: 13px; color: ${proposal.status === 'APPROVED_PASSED' ? 'var(--success, #34d399)' : 'var(--danger, #f87171)'}; margin-bottom: 10px;">
-                ${proposal.status === 'APPROVED_PASSED' ? '✓ Healed spec executed on separate copy. Official TC2 run preserved untouched.' : '✖ Previous run failed. You can re-run below.'}
-              </div>
-              <button id="approveHealingBtn" class="btn" onclick="window.approveHealing()" style="width: 100%; justify-content: center; font-weight: 700;">
-                ✓ Re-run Healed Spec
-              </button>
-            `}
-          </div>
-          <div id="healingCardFeedback" style="margin-top: 12px;"></div>
-        </div>
-      </div>
-
-      <!-- Bonus 2: Stability Score (TC1) -->
-      <div id="cardStability" style="padding: 22px; display: flex; flex-direction: column; justify-content: space-between;">
-        <div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-            <h3 class="bonus-card-title" style="font-size: 18px; font-weight: 700; color: var(--card-title-color, #f1f5f9);">2. Stability Score (TC1)</h3>
-            <span id="stabilityStatusBadge" class="badge ${stability && stability.passedRuns === stability.totalRuns ? 'badge-pass' : 'badge-warn'}">
-              ${stability ? stability.scoreText : 'Not yet calculated'}
-            </span>
-          </div>
-          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-            Executes the complete registration flow 3 consecutive times with fresh UUID synthetic credentials to detect flakiness or state collisions.
-          </p>
-          <div id="stabilityResultBox">
-            ${stability ? `
-              <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
-                ${stability.runs.map(r => `
-                  <div class="stability-run-item" style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); border: 1px solid #1e293b; border-radius: 6px; padding: 8px 12px; font-size: 13px;">
-                    <div>
-                      <strong>Run ${r.runIndex}:</strong> <span class="badge ${r.status === 'PASSED' ? 'badge-pass' : 'badge-fail'}">${r.status}</span>
-                      <span style="font-size: 12px; color: var(--text-muted); margin-left: 6px;">(${r.durationMs}ms)</span>
-                    </div>
-                    <div style="font-size: 12px; color: var(--text-muted); font-family: monospace;">${r.username}</div>
-                  </div>
-                `).join('')}
-              </div>
-            ` : `
-              <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 14px;">
-                Click below to run the 3-iteration stability test.
-              </div>
-            `}
-          </div>
-        </div>
-        <div>
-          <button id="runStabilityBtn" class="btn" style="width: 100%; justify-content: center; font-weight: 600;">
-            ⚡ Recalculate 3x Stability Score
-          </button>
-          <div id="stabilityCardFeedback" style="margin-top: 12px;"></div>
-        </div>
-      </div>
-
-      <!-- Bonus 3: Accessibility Audit -->
-      <div id="cardA11y" style="padding: 22px; display: flex; flex-direction: column; justify-content: space-between;">
-        <div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-            <h3 class="bonus-card-title" style="font-size: 18px; font-weight: 700; color: var(--card-title-color, #f1f5f9);">3. Accessibility Check (axe-core)</h3>
-            <span id="a11yStatusBadge" class="badge ${accessibility && accessibility.violationsCount === 0 ? 'badge-pass' : 'badge-warn'}">
-              ${accessibility ? `${accessibility.violationsCount} violations found` : 'Not yet run'}
-            </span>
-          </div>
-          <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-            <div><strong>Page URL:</strong> <code>${accessibility ? accessibility.url : 'http://localhost:3000/register'}</code></div>
-            <div><strong>Checked At:</strong> <span id="a11yTimestamp">${accessibility ? new Date(accessibility.inspectedAt).toLocaleTimeString() : 'N/A'}</span></div>
-          </div>
-          <div id="a11yResultBox">
-            ${accessibility ? `
-              <div tabindex="0" style="max-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
-                ${accessibility.violations.length === 0 ? `
-                  <div style="font-size: 13px; color: var(--success, #34d399);">✓ No accessibility violations found!</div>
-                ` : accessibility.violations.map(v => `
-                  <div class="a11y-violation-item" style="background: rgba(0,0,0,0.3); border: 1px solid #1e293b; border-radius: 6px; padding: 8px 12px; font-size: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                      <strong class="a11y-violation-id" style="color: var(--flow-title, #60a5fa);">${escapeHtml(v.id)}</strong>
-                      <span class="badge badge-fail" style="font-size: 11px; padding: 2px 6px;">${escapeHtml(v.impact)}</span>
-                    </div>
-                    <div class="a11y-violation-desc" style="color: var(--text, #cbd5e1); margin-bottom: 4px;">${escapeHtml(v.description)}</div>
-                    <a href="${escapeHtml(v.helpUrl)}" target="_blank" class="a11y-violation-link" style="color: var(--accent, #93c5fd); text-decoration: underline; font-size: 11px;">Rule details ↗</a>
-                  </div>
-                `).join('')}
-              </div>
-            ` : `
-              <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 14px;">
-                Click below to execute the automated axe-core audit.
-              </div>
-            `}
-          </div>
-        </div>
-        <div>
-          <button id="runA11yBtn" class="btn" style="width: 100%; justify-content: center; font-weight: 600;">
-            🔍 Run Accessibility Check
-          </button>
-          <div id="a11yCardFeedback" style="margin-top: 12px;"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <script src="/app.js"></script>
 </body>
 </html>`;
-}
-
-function renderCustomRunRow(run: any): string {
-  let inputObj: any = {};
-  let unresolved: string[] = [];
-  try { inputObj = JSON.parse(run.inputJson); } catch {}
-  try { unresolved = JSON.parse(run.unresolvedItemsJson || '[]'); } catch {}
-
-  const relEvidenceDir = path.basename(run.evidencePath || run.id.toLowerCase());
-  const timelineId = 'custom_timeline_' + run.id;
-
-  const evidenceDir = path.resolve(process.cwd(), 'evidence', relEvidenceDir);
-  const hasScreenshot = fs.existsSync(path.join(evidenceDir, 'run_1_screenshot.png'));
-  const hasTrace = fs.existsSync(path.join(evidenceDir, 'run_1_trace.zip'));
-  const hasRawError = fs.existsSync(path.join(evidenceDir, 'raw_playwright_error.txt'));
-  const hasDraft1 = fs.existsSync(path.join(evidenceDir, 'draft_1_rejected.spec.ts'));
-  const hasDraft2 = fs.existsSync(path.join(evidenceDir, 'draft_2_approved.spec.ts'));
-  const specFileName = `${run.testCaseId.toLowerCase()}_flow.spec.ts`;
-  const hasSpec = fs.existsSync(path.join(evidenceDir, specFileName));
-  const hasDbRecord = fs.existsSync(path.join(evidenceDir, 'backend_verification_run_1.json'));
-
-  // Determine status (Drafting, Pending approval, Approved, Running, Passed, Failed, Rejected, Error)
-  let statusText = 'Pending approval';
-  let badgeClass = 'badge-warn';
-
-  if (run._isDrafting || run.approvalStatus === 'DRAFTING') {
-    statusText = 'Drafting';
-    badgeClass = 'badge-warn';
-  } else if (run._isRunning || run.run1Status === 'RUNNING') {
-    statusText = 'Running...';
-    badgeClass = 'badge-warn';
-  } else if (run.approvalStatus === 'REJECTED') {
-    statusText = 'Rejected';
-    badgeClass = 'badge-fail';
-  } else if (run.run1Status === 'PASSED') {
-    statusText = 'Passed';
-    badgeClass = 'badge-pass';
-  } else if (run.run1Status === 'FAILED') {
-    statusText = 'Failed';
-    badgeClass = 'badge-fail';
-  } else if (run.run1Status === 'ERROR' || run.approvalStatus === 'ERROR') {
-    statusText = 'Error';
-    badgeClass = 'badge-fail';
-  } else if (run.approvalStatus === 'APPROVED' && run.run1Status === 'PENDING') {
-    statusText = 'Running...';
-    badgeClass = 'badge-warn';
-  } else if (run.approvalStatus === 'PENDING_APPROVAL') {
-    statusText = 'Pending approval';
-    badgeClass = 'badge-warn';
-  } else if (run.approvalStatus === 'APPROVED') {
-    statusText = 'Approved';
-    badgeClass = 'badge-pass';
-  }
-
-  const isPending = (run.approvalStatus === 'PENDING_APPROVAL' && (run.run1Status === 'PENDING' || !run.run1Status));
-  const isRunning = (statusText === 'Running...' || statusText === 'Drafting');
-
-  // Approver and timestamp
-  const approverName = run.approver || (isPending ? 'human' : 'human');
-  const runTime = run.updatedAt || run.createdAt;
-  const formattedTime = runTime ? new Date(runTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'N/A';
-
-  // Run and rerun result display with stamp-style badges
-  let runResultHtml = '';
-  if (isRunning) {
-    runResultHtml = `
-      <div class="run-verdict-stack">
-        <div class="run-verdict-item">
-          <span class="badge badge-warn badge-stamp">⏳ ${statusText.toUpperCase()}</span>
-        </div>
-      </div>
-    `;
-  } else if (isPending) {
-    runResultHtml = `
-      <div class="run-verdict-stack">
-        <div class="run-verdict-item">
-          <span class="badge badge-warn badge-stamp">⏳ AWAITING APPROVAL</span>
-        </div>
-      </div>
-    `;
-  } else if (statusText === 'Rejected') {
-    runResultHtml = `
-      <div class="run-verdict-stack">
-        <div class="run-verdict-item">
-          <span class="badge badge-fail badge-stamp">✖ REJECTED</span>
-        </div>
-        <div class="run-verdict-sub">Halted by human</div>
-      </div>
-    `;
-  } else if (statusText === 'Error') {
-    runResultHtml = `
-      <div class="run-verdict-stack">
-        <div class="run-verdict-item">
-          <span class="badge badge-fail badge-stamp">✖ ERROR</span>
-        </div>
-      </div>
-    `;
-  } else {
-    runResultHtml = `
-      <div class="run-verdict-stack">
-        <div class="run-verdict-item">
-          <span class="run-verdict-label">Run 1</span>
-          <span class="badge ${run.run1Status === 'PASSED' ? 'badge-pass' : 'badge-fail'} badge-stamp">${run.run1Status === 'PASSED' ? '✓ ' : '✖ '}${run.run1Status || 'N/A'}</span>
-        </div>
-        <div class="run-verdict-item">
-          <span class="run-verdict-label">Rerun</span>
-          <span class="badge ${run.run2Status === 'PASSED' ? 'badge-pass' : 'badge-fail'} badge-stamp">${run.run2Status === 'PASSED' ? '✓ ' : '✖ '}${run.run2Status || 'N/A'}</span>
-        </div>
-      </div>
-    `;
-  }
-
-  // Observed vs intended display
-  let observedHtml = '';
-  if (run.run1Status === 'FAILED' || statusText === 'Error') {
-    observedHtml = `
-      <div style="color: var(--danger); font-weight: 600; font-size: 13px; line-height: 1.45; word-break: break-word; overflow-wrap: anywhere;">
-        ✖ ${escapeHtml(run.actualResult || 'Test execution failed.')}
-      </div>
-    `;
-  } else if (run.run1Status === 'PASSED') {
-    observedHtml = `
-      <div style="font-size: 13px; font-weight: 500; white-space: pre-line; line-height: 1.45; word-break: break-word; overflow-wrap: anywhere; color: var(--success);">
-        ✓ ${escapeHtml(run.actualResult || 'Assertions passed.')}
-      </div>
-    `;
-  } else if (isPending) {
-    observedHtml = `<div style="font-size: 13px; color: var(--text-muted); line-height: 1.4; word-break: break-word; overflow-wrap: anywhere;">Awaiting human approval before execution.</div>`;
-  } else if (statusText === 'Rejected') {
-    observedHtml = `<div style="font-size: 13px; color: var(--danger); line-height: 1.4; word-break: break-word; overflow-wrap: anywhere;">${escapeHtml(run.actualResult || 'Draft was rejected by human.')}</div>`;
-  } else if (isRunning) {
-    observedHtml = `<div style="font-size: 13px; color: var(--accent); line-height: 1.4; word-break: break-word; overflow-wrap: anywhere;">Executing against demo app...</div>`;
-  } else {
-    observedHtml = `<div style="font-size: 13px; color: var(--text-muted); line-height: 1.45; word-break: break-word; overflow-wrap: anywhere;">${escapeHtml(run.actualResult || '')}</div>`;
-  }
-
-  const mainRow = `
-  <tr id="row_${run.id}">
-    <td class="col-tc">
-      <span class="badge badge-tc">${run.testCaseId}</span>
-      <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; font-family: var(--mono);">${run.id.split('_')[1] || ''}</div>
-      <button class="btn timeline-toggle-btn" data-timeline-id="${timelineId}" style="margin-top: 6px; padding: 4px 6px; font-size: 11px; width: 100%; justify-content: center; font-weight: 700;">⏱ Timeline ▾</button>
-    </td>
-    <td class="col-flow">
-      <div class="flow-title-text" style="font-weight: 700; color: var(--flow-title); font-size: 14px; line-height: 1.4; word-break: break-word; overflow-wrap: anywhere; white-space: pre-wrap;">${escapeHtml(inputObj.flow_description || '')}</div>
-      <div style="font-size: 13px; color: var(--text-muted); margin-top: 6px; line-height: 1.4; word-break: break-word; overflow-wrap: anywhere; white-space: pre-wrap;">
-        <strong style="color: var(--label-color);">Expected:</strong> ${escapeHtml(run.expectedResult || inputObj.expected_end_state || '')}
-      </div>
-      ${unresolved.length > 0 ? `
-        <div style="margin-top: 8px;">
-          <span class="badge badge-fail badge-stamp" style="font-size: 11px;">✖ UNRESOLVED LOCATORS</span>
-          <ul style="font-size: 12px; color: var(--danger); margin-left: 14px; margin-top: 4px; word-break: break-word; overflow-wrap: anywhere; font-family: var(--mono);">
-            ${unresolved.map(u => `<li>${escapeHtml(u)}</li>`).join('')}
-          </ul>
-        </div>
-      ` : '<div style="font-size: 12.5px; color: var(--success); margin-top: 6px; font-weight: 600;">✓ Selectors resolved</div>'}
-    </td>
-    <td class="col-source">
-      <div style="font-size: 12px; word-break: break-all; overflow-wrap: anywhere; font-family: var(--mono);"><code>${escapeHtml(run.sourceUrl || 'http://localhost:3000/register')}</code></div>
-      <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 5px; font-family: var(--mono);">
-        Inspected: ${run.retrievalTime ? new Date(run.retrievalTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
-      </div>
-    </td>
-    <td class="col-approval">
-      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-        <span id="badge_${run.id}" class="badge ${badgeClass} badge-stamp">${statusText.toUpperCase()}</span>
-        <span class="badge badge-approver" style="font-size: 11px; font-family: var(--mono);">Approver: ${escapeHtml(approverName)}</span>
-      </div>
-      <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px; font-family: var(--mono);">
-        Time: ${formattedTime}
-      </div>
-      ${run.criticFeedback ? `
-        <div style="font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.4; word-break: break-word; overflow-wrap: anywhere;">
-          ${escapeHtml(run.criticFeedback)}
-        </div>
-      ` : ''}
-      ${isPending ? `
-        <div style="display: flex; gap: 6px; margin-top: 10px;">
-          <button class="btn" onclick="window.approveCustomDraft('${run.id}')" style="background: var(--success); color: #042f1a; font-size: 12px; padding: 5px 12px; font-weight: 800; border-color: var(--success);">
-            ✓ Approve
-          </button>
-          <button class="btn" onclick="window.rejectCustomDraft('${run.id}')" style="background: var(--danger); color: #3b070c; font-size: 12px; padding: 5px 12px; font-weight: 800; border-color: var(--danger);">
-            ✖ Reject
-          </button>
-        </div>
-      ` : ''}
-    </td>
-    <td class="col-run-result">
-      ${runResultHtml}
-    </td>
-    <td class="col-observed">
-      ${observedHtml}
-    </td>
-    <td class="col-evidence">
-      <div class="evidence-list" style="display: flex; flex-direction: column; gap: 8px;">
-        ${hasScreenshot ? `<a class="chip-evidence chip-screenshot" href="/evidence/${relEvidenceDir}/run_1_screenshot.png" target="_blank">📷 Screenshot</a>` : ''}
-        ${hasTrace ? `<a class="chip-evidence chip-trace" href="/evidence/${relEvidenceDir}/run_1_trace.zip" target="_blank">🔍 Trace Zip</a>` : ''}
-        ${hasDraft2 ? `<a class="chip-evidence chip-spec-approved" href="/evidence/${relEvidenceDir}/draft_2_approved.spec.ts" target="_blank">📄 Draft 2 (Approved)</a>` : ''}
-        ${hasDraft1 ? `<a class="chip-evidence chip-spec-rejected" href="/evidence/${relEvidenceDir}/draft_1_rejected.spec.ts" target="_blank">📄 Draft 1 (Rejected)</a>` : ''}
-        ${!hasDraft1 && !hasDraft2 && hasSpec ? `<a class="chip-evidence chip-spec" href="/evidence/${relEvidenceDir}/${specFileName}" target="_blank">📄 Spec File</a>` : ''}
-        ${hasDbRecord ? `<a class="chip-evidence chip-db" href="/evidence/${relEvidenceDir}/backend_verification_run_1.json" target="_blank">🗄 DB Record</a>` : ''}
-        ${hasRawError ? `<a class="chip-evidence chip-error" href="/evidence/${relEvidenceDir}/raw_playwright_error.txt" target="_blank">⚠ Raw Error</a>` : ''}
-        ${!hasScreenshot && !hasTrace && !hasSpec && !hasDraft1 && !hasDraft2 ? `<span style="font-size: 11.5px; color: var(--text-muted); font-family: var(--mono);">(Available after run)</span>` : ''}
-      </div>
-    </td>
-  </tr>
-  `;
-
-  const timelineRow = renderTimelineRow(run, timelineId, relEvidenceDir);
-  return mainRow + timelineRow;
 }
 
 function renderRunRow(run: any, isHistorical = false): string {
@@ -2796,8 +1790,6 @@ function renderTimelineRow(run: any, timelineId: string, relEvidenceDir: string)
   const isTc3 = run.testCaseId === 'TC3' || run.approvalStatus === 'DRAFT_REJECTED_UPGRADED';
   const isUncertain = unresolved.length > 0 || isTc2;
   const isDraftRejected = run.approvalStatus === 'DRAFT_REJECTED_UPGRADED' || run.criticFeedback?.includes('REJECTED');
-  const isPendingApproval = run.approvalStatus === 'PENDING_APPROVAL';
-  const isRunning = run._isRunning || run.run1Status === 'RUNNING';
 
   const formatT = (t: string) => {
     if (!t) return 'N/A';
@@ -2835,8 +1827,8 @@ function renderTimelineRow(run: any, timelineId: string, relEvidenceDir: string)
         <div class="timeline-title-row">
           <span class="timeline-pipeline-title">⚡ Agent Timeline Metro Line — ${run.testCaseId}</span>
           <span class="badge badge-tc">${run.id}</span>
-          <span class="badge ${isPendingApproval ? 'badge-warn badge-stamp' : (run.approvalStatus === 'REJECTED' ? 'badge-fail badge-stamp' : 'badge-pass badge-stamp')}">
-            ${isPendingApproval ? '⏳ WAITING FOR HUMAN' : (run.approvalStatus === 'REJECTED' ? '✖ REJECTED · ' + escapeHtml(realApprover) : '✓ APPROVED · ' + escapeHtml(realApprover))}
+          <span class="badge ${run.approvalStatus === 'REJECTED' ? 'badge-fail badge-stamp' : 'badge-pass badge-stamp'}">
+            ${run.approvalStatus === 'REJECTED' ? '✖ REJECTED · ' + escapeHtml(realApprover) : '✓ APPROVED · ' + escapeHtml(realApprover)}
           </span>
         </div>
         <div class="timeline-meta-text">
@@ -2848,8 +1840,7 @@ function renderTimelineRow(run: any, timelineId: string, relEvidenceDir: string)
 
       <!-- HORIZONTAL METRO-LINE TRACK (8 Stations) -->
       <div class="metro-track-container">
-        <div class="metro-track-line ${isRunning || isPendingApproval ? 'metro-track-active' : ''}">
-          ${isRunning || isPendingApproval ? '<div class="metro-active-dot" aria-hidden="true"></div>' : ''}
+        <div class="metro-track-line">
         </div>
 
         <div class="timeline-stepper">
@@ -2928,29 +1919,20 @@ function renderTimelineRow(run: any, timelineId: string, relEvidenceDir: string)
           </div>
 
           <!-- Station 5: Approval -->
-          <div class="timeline-step ${isPendingApproval ? 'station-pending station-waiting' : (run.approvalStatus === 'REJECTED' ? 'station-fail' : 'station-done')}">
+          <div class="timeline-step ${run.approvalStatus === 'REJECTED' ? 'station-fail' : 'station-done'}">
             <div class="timeline-step-rail"><span class="timeline-step-index">5</span></div>
             <div class="timeline-step-card">
               <div>
                 <div class="timeline-step-title">5. Approval</div>
-                <span class="badge ${isPendingApproval ? 'badge-warn' : (run.approvalStatus === 'REJECTED' ? 'badge-fail' : 'badge-pass')} station-badge">
-                  <span class="status-icon">${isPendingApproval ? '⏳' : (run.approvalStatus === 'REJECTED' ? '✖' : '✓')}</span>
-                  ${isPendingApproval ? 'Waiting for human' : (run.approvalStatus === 'REJECTED' ? 'Rejected' : 'Done')}
+                <span class="badge ${run.approvalStatus === 'REJECTED' ? 'badge-fail' : 'badge-pass'} station-badge">
+                  <span class="status-icon">${run.approvalStatus === 'REJECTED' ? '✖' : '✓'}</span>
+                  ${run.approvalStatus === 'REJECTED' ? 'Rejected' : 'Done'}
                 </span>
                 <div class="station-time">${formatT(tApproval)}</div>
               </div>
               <div class="station-body">
-                ${isPendingApproval ? `
-                  <div style="color: #fbbf24; font-weight: 700; margin-bottom: 6px;">Waiting for human</div>
-                  <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px;">Review specification before execution:</div>
-                  <div style="display: flex; gap: 6px;">
-                    <button class="btn" onclick="window.approveCustomDraft('${run.id}')" style="flex: 1; justify-content: center; background: var(--success); color: #042f1a; font-size: 11px; font-weight: 800; border-color: var(--success); padding: 5px 6px;">✓ Approve</button>
-                    <button class="btn" onclick="window.rejectCustomDraft('${run.id}')" style="flex: 1; justify-content: center; background: var(--danger); color: #3b070c; font-size: 11px; font-weight: 800; border-color: var(--danger); padding: 5px 6px;">✖ Reject</button>
-                  </div>
-                ` : `
-                  <div style="margin-bottom: 3px;"><strong>Approver:</strong> ${escapeHtml(realApprover)}</div>
-                  <div><strong>Version:</strong> ${escapeHtml(approvedVersion)}</div>
-                `}
+                <div style="margin-bottom: 3px;"><strong>Approver:</strong> ${escapeHtml(realApprover)}</div>
+                <div><strong>Version:</strong> ${escapeHtml(approvedVersion)}</div>
               </div>
             </div>
           </div>

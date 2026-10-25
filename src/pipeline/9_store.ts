@@ -91,7 +91,7 @@ function seedIfEmpty(db: DatabaseSync) {
   try {
     const row = db.prepare('SELECT COUNT(*) as count FROM pipeline_runs').get() as any;
     if (row && row.count === 0) {
-      console.log('Database pipeline_runs is empty. Seeding 4 official runs and bonus data from seed.sqlite...');
+      console.log('Database pipeline_runs is empty. Seeding 4 official runs from seed.sqlite...');
       const seedDb = new DatabaseSync(SEED_PATH);
       const runs = seedDb.prepare('SELECT * FROM pipeline_runs').all() as any[];
       const insertRun = db.prepare(`

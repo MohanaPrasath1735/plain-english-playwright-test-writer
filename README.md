@@ -1,6 +1,6 @@
 # Autonomous Plain-English Playwright Test Writer Agent
 
-An autonomous AI QA engineering platform that transforms plain-English descriptions of user flows into hardened, executable Playwright test scripts. The platform browses live web applications, reasons about accessible semantic locators, prompts Google Gemini for spec drafting, evaluates and upgrades weak assertions using a Critic agent, requires human approval gates, runs automated stability reruns, directly queries application database state, and presents full lifecycle telemetry in an interactive web dashboard.
+Plain-English Playwright Test Writer: official test runs with evidence, plus a live Site Check. The platform browses live web applications, reasons about accessible semantic locators, evaluates and upgrades weak assertions using a Critic agent, enforces human approval gates, executes stability reruns with synthetic data, directly validates application database state in SQLite, and presents complete lifecycle telemetry in an interactive web dashboard with downloadable evidence, agent timelines, and an external public site auditor.
 
 ---
 
@@ -13,7 +13,7 @@ The platform operates on a deterministic 8-station pipeline architecture:
 ```
 
 1. **Understand (`1_understand.ts`)**:
-   - Ingests user input `{ testCaseId, flow_description, expected_end_state }`.
+   - Ingests test case input `{ testCaseId, flow_description, expected_end_state }`.
    - Validates input schemas with Zod and resolves the target base URL dynamically from `APP_BASE_URL`.
 2. **Browse (`2_browse.ts`)**:
    - Launches headless Chromium via Playwright.
@@ -35,20 +35,17 @@ The platform operates on a deterministic 8-station pipeline architecture:
    - Connects directly to the application database (Conduit SQLite: `prisma/db.sqlite`) to confirm record insertion and verify duplicate prevention via `SELECT COUNT(*) FROM User WHERE email = ?`.
 8. **Report (`9_store.ts` & `10_webui.ts`)**:
    - Persists all run records, step event timestamps, and artifacts into local SQLite (`agent_data.sqlite`).
-   - Serves the live telemetry dashboard featuring the 8-station metro stepper, active benchmark runs, custom scenario runs, and downloadable evidence.
+   - Serves the live telemetry dashboard featuring the 8-station metro stepper, active benchmark runs, archived history, and downloadable evidence.
 
 ---
 
 ## Key Features
 
-- **Plain-English to Playwright Spec**: Converts natural language user flows into production-ready TypeScript Playwright tests.
-- **Deterministic Critic Review**: Automatically identifies and rejects shallow URL assertions, rewriting specs to assert authentic DOM state.
-- **Negative Testing & Diagnostics**: Accurately diagnoses and isolates intentional selector mutations (e.g. TC2) without masking errors.
-- **Database State Proof**: Verifies backend database records directly in SQLite to guarantee zero duplicate accounts across reruns.
-- **Self-Healing Selectors (Bonus)**: Re-inspects failing pages and proposes resilient semantic locator fixes with a dedicated human approval workflow.
-- **Multi-Run Stability Scoring (Bonus)**: Executes consecutive test iterations with synthetic UUID credentials to compute flakiness scores (`Stability: 3/3 passed`).
-- **Accessibility Auditing (Bonus)**: Integrated in-browser axe-core testing checking pages against WCAG AA accessibility standards.
-- **External Site Checker (`/site-check`)**: Safe, read-only crawler for public URLs reporting status codes, page titles, interactive elements, broken links, accessibility violations, and proposed test scenarios with both Light and Dark modes.
+- **Recorded Official Runs with Evidence**: 4 benchmark test cases with full lifecycle evidence (Screenshots, Traces, Spec files, DB Proofs, Raw Playwright errors, and Agent Timelines).
+- **Deterministic Critic Review (TC3)**: Automatically identifies and rejects shallow URL assertions, rewriting specs to assert authentic DOM state.
+- **Negative Testing & Diagnostics (TC2)**: Accurately diagnoses and isolates intentional selector mutations without masking errors.
+- **Database State Proof (TC4)**: Verifies backend database records directly in SQLite to guarantee zero duplicate accounts across reruns.
+- **External Site Checker (`/site-check`)**: Safe, read-only crawler for public URLs reporting status codes, page titles, interactive elements, broken links, accessibility violations (axe-core), and proposed test scenarios with both Light and Dark modes.
 
 ---
 
@@ -129,7 +126,7 @@ The platform is fully packaged for deployment as a single self-contained Docker 
 - **Health Check Probe**: Built-in `/health` (and `/api/health`) endpoint returning HTTP 200 with service status, uptime, database connection state, and port.
 - **Rate Limiting**: Protects all execution and LLM endpoints with a 15 request/minute per-IP rate limiter (HTTP 429 with `Retry-After`).
 - **SSRF Guard**: Strict server-side request forgery protection blocking private IP ranges, link-local metadata addresses, and unauthorized loopback ports while allowlisting internal Conduit.
-- **Automatic Seed on Startup**: Automatically initializes SQLite from `data/seed.sqlite` if the database is missing or empty, immediately providing the 4 official benchmark runs and bonus data.
+- **Automatic Seed on Startup**: Automatically initializes SQLite from `data/seed.sqlite` if the database is missing or empty, immediately providing the 4 official benchmark runs.
 
 ### 1. Build the Docker Image
 ```bash
@@ -223,10 +220,9 @@ Click **Open in Browser** (or navigate to the **Ports** tab and open port `3050`
 - Public security: all endpoints initiating test execution or LLM prompts are guarded by a 15 req/min rate limiter (HTTP 429), and external crawl requests are strictly guarded against SSRF.
 
 ### 5. Run Benchmark Tests from Codespace Terminal
-You can also run tests or bonus features at any time:
+You can run tests at any time:
 ```bash
 npm run test:all
-npm run bonus
 ```
 
 ---
@@ -267,14 +263,6 @@ npm test
   ```
   *Executes Run 1 and Rerun with unique UUID synthetic credentials. Verifies `SELECT COUNT(*) FROM User WHERE email = ...` returns exactly 1 for each user.*
 
-### Run Bonus Features
-```bash
-# Run stability 3x calculation and axe-core accessibility audit
-npm run bonus
-
-# Approve and execute the TC2 self-healing fix on a separate copy
-npm run bonus:heal
-```
 
 ---
 

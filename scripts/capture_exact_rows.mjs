@@ -34,15 +34,7 @@ async function capture() {
       console.error('Could not find TC3 row');
     }
 
-    // 2. Locate Custom Scenario row
-    const customRow = await page.$('#customRunsTable tbody tr:first-child');
-    if (customRow) {
-      const customPath = path.join(outputDir, `custom_scenario_row_${theme}_verified.png`);
-      await customRow.screenshot({ path: customPath });
-      console.log(`Saved Custom Scenario row (${theme}): ${customPath}`);
-    } else {
-      console.error('Could not find Custom Scenario row');
-    }
+
 
     await context.close();
   }

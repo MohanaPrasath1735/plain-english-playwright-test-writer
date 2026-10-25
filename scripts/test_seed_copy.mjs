@@ -26,10 +26,7 @@ try {
   const siteChecks = db.prepare('SELECT COUNT(*) as count FROM site_checks').get().count;
   console.log('Copied site checks count:', siteChecks);
 
-  const bonusHeal = db.prepare('SELECT COUNT(*) as count FROM bonus_healing').get().count;
-  console.log('Copied bonus healing count:', bonusHeal);
-
-  if (runs.length === 4 && siteChecks === 0 && bonusHeal === 1) {
+  if (runs.length === 4 && siteChecks === 0) {
     console.log('✓ Automatic seed copy verification SUCCESSFUL!');
   } else {
     throw new Error('Seed copy did not match expected records');

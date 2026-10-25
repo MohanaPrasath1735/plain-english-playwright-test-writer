@@ -81,71 +81,13 @@ async function main() {
   const afterHistoryVisible = await historyContainer.isVisible();
   console.log(`History container visibility before: ${beforeHistoryVisible}, after: ${afterHistoryVisible}`);
 
-  // 5. Test Bonus Buttons: Stability & Accessibility
-  console.log('[5/8] Testing Bonus buttons...');
-  const stabilityBtn = page.locator('#runStabilityBtn');
-  if (await stabilityBtn.isVisible()) {
-    console.log('Clicking runStabilityBtn...');
-    await stabilityBtn.click();
-    await page.waitForSelector('#stabilityStatusBadge:not(:has-text("Running"))', { timeout: 30000 });
-    const stabilityText = await page.locator('#stabilityStatusBadge').innerText();
-    console.log(`Stability result: ${stabilityText}`);
-  }
+  // 5. Verify removed bonus and draft elements are not present
+  console.log('[5/8] Verifying removed bonus and draft elements are absent...');
+  const removedDraftBtn = page.locator('#draftTestBtn');
+  console.log(`draftTestBtn present? ${await removedDraftBtn.count() > 0} (Expected: false)`);
+  const removedBonusContainer = page.locator('.bonus-section-container');
+  console.log(`bonusSectionContainer present? ${await removedBonusContainer.count() > 0} (Expected: false)`);
 
-  const a11yBtn = page.locator('#runA11yBtn');
-  if (await a11yBtn.isVisible()) {
-    console.log('Clicking runA11yBtn...');
-    await a11yBtn.click();
-    await page.waitForSelector('#a11yStatusBadge:not(:has-text("Auditing"))', { timeout: 30000 });
-    const a11yText = await page.locator('#a11yStatusBadge').innerText();
-    console.log(`A11y check result: ${a11yText}`);
-  }
-
-  // 6. Test Interactive New Test Scenario: Preset fill, Draft test, and Approve
-  console.log('[6/8] Testing New Test Scenario draft & approve flow...');
-  await page.evaluate(() => {
-    if (window.fillScenario) window.fillScenario('TC1');
-  });
-  const scenarioVal = await page.locator('#scenarioInput').inputValue();
-  console.log(`Scenario input filled: "${scenarioVal.slice(0, 50)}..."`);
-
-  const draftBtn = page.locator('#draftTestBtn');
-  await draftBtn.click();
-
-  console.log('Waiting for Step 1–5 drafting to complete and pending approval to appear...');
-  await page.waitForSelector('#pendingApprovalContainer', { state: 'visible', timeout: 60000 });
-  const pendingRunIdText = await page.locator('#pendingRunId').innerText();
-  console.log(`Pending approval container visible! ${pendingRunIdText}`);
-
-  // Click Approve & Execute Test
-  console.log('Clicking Approve & Execute Test button...');
-  const approveBtn = page.locator('#approveDraftBtn');
-  await approveBtn.click();
-
-  // Wait for execution to complete
-  await page.waitForSelector('#approvalActionFeedback:has-text("Approved")', { timeout: 60000 });
-  const feedbackText = await page.locator('#approvalActionFeedback').innerText();
-  console.log(`Approval execution feedback: ${feedbackText}`);
-
-  // Verify custom scenario runs table has at least 1 run
-  await page.waitForTimeout(1000);
-  const customRowsCount = await page.locator('#customRunsTbody tr:not(.timeline-row)').count();
-  console.log(`Custom scenario runs count in table: ${customRowsCount}`);
-
-  // Test expanding the timeline on the custom run
-  const firstTimelineToggle = page.locator('#customRunsTbody .timeline-toggle-btn').first();
-  if (await firstTimelineToggle.isVisible()) {
-    console.log('Expanding custom run timeline...');
-    await firstTimelineToggle.click();
-    await page.waitForTimeout(400);
-
-    // Verify 8 stations metro line
-    const stationsCount = await page.locator('#customRunsTbody .timeline-row .timeline-step').count();
-    console.log(`Stations count in metro-line: ${stationsCount}`);
-
-    const stationTitles = await page.locator('#customRunsTbody .timeline-row .timeline-step-title').allInnerTexts();
-    console.log('Station titles found:', stationTitles);
-  }
 
   // 7. Run axe-core accessibility audit on the page
   console.log('[7/8] Running axe-core accessibility audit on Test Writer page...');

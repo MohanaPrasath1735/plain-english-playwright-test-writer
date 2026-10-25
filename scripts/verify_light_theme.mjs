@@ -53,11 +53,7 @@ async function run() {
     await officialContainer.screenshot({ path: path.join(artifactDir, 'test_writer_light_official_runs.png') });
   }
 
-  // Custom scenario runs screenshot
-  const customSection = await page.$('#customScenariosSection');
-  if (customSection) {
-    await customSection.screenshot({ path: path.join(artifactDir, 'test_writer_light_custom_runs.png') });
-  }
+
 
   // Timeline screenshot
   const timelineEl = await page.$('.timeline-row[style*="table-row"]');
@@ -70,11 +66,7 @@ async function run() {
     }
   }
 
-  // Bonus cards screenshot
-  const bonusContainer = await page.$('.bonus-section-container');
-  if (bonusContainer) {
-    await bonusContainer.screenshot({ path: path.join(artifactDir, 'test_writer_light_bonus_cards.png') });
-  }
+
 
   console.log('--- 2. Testing Site Check Page (Light Theme) ---');
   await page.goto('http://localhost:3050/site-check', { waitUntil: 'domcontentloaded' });

@@ -14,10 +14,7 @@
     "test:tc1": "tsx src/index.ts TC1",
     "test:tc2": "tsx src/index.ts TC2",
     "test:tc3": "tsx src/index.ts TC3",
-    "test:tc4": "tsx src/index.ts TC4",
-    "bonus": "tsx src/bonus_runner.ts",
-    "bonus:all": "tsx src/bonus_runner.ts",
-    "bonus:heal": "tsx src/bonus_runner.ts heal-approve"
+    "test:tc4": "tsx src/index.ts TC4"
   },
   "keywords": [],
   "author": "",

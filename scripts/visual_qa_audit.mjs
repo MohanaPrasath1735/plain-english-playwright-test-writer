@@ -138,7 +138,7 @@ async function runAudit() {
           });
 
           // 4. Overlapping siblings (especially stamps, badges, buttons)
-          const stampContainers = document.querySelectorAll('.run-verdict-stack, .runs-table td, .top-nav-actions, .bonus-section-container, .hero-actions');
+          const stampContainers = document.querySelectorAll('.run-verdict-stack, .runs-table td, .top-nav-actions, .hero-actions');
           stampContainers.forEach(container => {
             const children = Array.from(container.children).filter(c => c.offsetParent !== null && !['SCRIPT', 'STYLE'].includes(c.tagName));
             for (let i = 0; i < children.length; i++) {

@@ -18,7 +18,6 @@ export function renderTopNavBar(activePage: 'test-writer' | 'site-check'): strin
           <a href="/site-check" id="navLinkSiteCheck" class="nav-link ${activePage === 'site-check' ? 'active' : ''}">
             <span class="nav-icon" aria-hidden="true">🌐</span>
             <span>Site Check</span>
-            <span class="nav-bonus-badge">Bonus</span>
           </a>
         </div>
         <button id="themeToggleBtn" type="button" class="theme-toggle-btn" aria-label="Switch between light and dark theme" title="Toggle theme">
@@ -85,7 +84,7 @@ export function renderSiteCheckPageHtml(records: SiteCheckRecord[]): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Site Check (Bonus Feature) - Agent Dashboard</title>
+  <title>Site Check - Agent Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
@@ -291,16 +290,7 @@ export function renderSiteCheckPageHtml(records: SiteCheckRecord[]): string {
       border-color: var(--accent);
       font-weight: 700;
     }
-    .nav-bonus-badge {
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      padding: 2px 7px;
-      border-radius: 999px;
-      background: linear-gradient(135deg, #0369a1, #1d4ed8);
-      color: #ffffff;
-      letter-spacing: 0.04em;
-    }
+
     .theme-toggle-btn {
       display: inline-flex;
       align-items: center;
@@ -339,16 +329,7 @@ export function renderSiteCheckPageHtml(records: SiteCheckRecord[]): string {
       margin-bottom: 12px;
       flex-wrap: wrap;
     }
-    .hero-bonus-badge {
-      background: linear-gradient(135deg, #0369a1, #1d4ed8);
-      color: #ffffff;
-      font-weight: 800;
-      font-size: 12px;
-      padding: 4px 12px;
-      border-radius: 999px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
+
     .hero-sub-badge {
       background: var(--bg-elevated);
       color: var(--text-muted);
@@ -1322,12 +1303,7 @@ export function renderSiteCheckPageHtml(records: SiteCheckRecord[]): string {
     }
 
     /* Light Mode Overrides for Site Check */
-    [data-theme="light"] .nav-bonus-badge,
-    [data-theme="light"] .hero-bonus-badge {
-      background: var(--accent);
-      color: #ffffff;
-      box-shadow: none;
-    }
+
     [data-theme="light"] .nav-brand-dot {
       box-shadow: none;
     }
@@ -1431,7 +1407,6 @@ export function renderSiteCheckPageHtml(records: SiteCheckRecord[]): string {
     <!-- Hero Header -->
     <header class="hero-header" role="banner">
       <div class="hero-badge-row">
-        <span class="hero-bonus-badge">Bonus Feature</span>
         <span class="hero-sub-badge">Public Deployed Website Auditor</span>
       </div>
       <h1 class="hero-title">Site Check</h1>
@@ -1449,7 +1424,7 @@ export function renderSiteCheckPageHtml(records: SiteCheckRecord[]): string {
           <div>• <strong>SSRF Guard:</strong> Accepts only <code>http://</code> and <code>https://</code>. Resolves hostname via DNS and strictly blocks loopback, link-local, private IP ranges (RFC 1918), and redirects to them. (Configured demo app APP_BASE_URL is allowlisted).</div>
           <div>• <strong>Crawl Boundaries:</strong> Same domain only, max 5 pages, max 20 links, 90-second timeout, 1-second delay between requests, and rate-limited. Respects <code>robots.txt</code> (shows <em>"skipped: disallowed by robots.txt"</em>).</div>
           <div>• <strong>Read-Only Inspection:</strong> Loads pages, inspects DOM, checks links, and takes screenshots. Never submits forms, signs up, or logs into another site during audit.</div>
-          <div>• <strong>Form Submission Testing:</strong> Executing any proposed test that submits a form strictly requires checking <em>"I own this site or have permission to test it"</em> AND an explicit <strong>Approve</strong>.</div>
+          <div>• <strong>Form Submission Testing:</strong> Executing any proposed test that submits a form strictly requires checking <em>"I own this site or have permission to test it"</em>.</div>
           <div>• <strong>Bot Protection:</strong> Never bypasses CAPTCHA, OTP, or Cloudflare/bot challenges. If detected, halts and reports <em>"Blocked or manual step required"</em>.</div>
         </div>
       </details>

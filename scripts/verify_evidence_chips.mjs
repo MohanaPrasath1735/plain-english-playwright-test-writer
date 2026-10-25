@@ -113,15 +113,6 @@ async function verifyChips() {
           console.log(`Captured TC3 screenshot: ${tc3Path}`);
         }
 
-        // Screenshot Custom Scenario row
-        const customRow = await page.$('#customRunsTable tbody tr:first-child');
-        if (customRow) {
-          const customPath = path.join(outputDir, `custom_scenario_row_${theme}_1366px.png`);
-          await customRow.screenshot({ path: customPath });
-          console.log(`Captured Custom Scenario screenshot: ${customPath}`);
-        } else {
-          console.log('No custom row rendered in DOM');
-        }
       }
 
       await context.close();
